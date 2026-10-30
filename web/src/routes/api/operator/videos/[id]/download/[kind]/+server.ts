@@ -31,7 +31,12 @@ export const GET: RequestHandler = async (event) => {
 		const key = params.kind === 'dubbed' ? v.dubbed_key : v.source_key;
 		if (!key) error(404, params.kind === 'dubbed' ? 'The Hindi video is not ready yet.' : 'No source file.');
 		const ext = key.slice(key.lastIndexOf('.'));
-		return serve(key, params.kind === 'dubbed' ? 'video/mp4' : (v.mime ?? 'video/mp4'), request.headers.get('range'), `${base}_${params.kind === 'dubbed' ? 'hindi' : 'english'}${ext}`);
+		return serve(key, params.kind === 'dubbed' ? 'video/mp4' : (v.mime ?? 'video/mp4'), {
+			range: request.headers.get('range'),
+			ifRange: request.headers.get('if-range'),
+			download: `${base}_${params.kind === 'dubbed' ? 'hindi' : 'english'}${ext}`,
+			maxAge: 0
+		});
 	}
 
 	const segs = await loadSegments(id);

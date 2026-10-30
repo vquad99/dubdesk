@@ -14,7 +14,8 @@ export const load: PageServerLoad = async () => ({
 		role: string;
 		active: boolean;
 		last_login_at: Date | null;
-	}>('SELECT id, email, name, role, active, last_login_at FROM users ORDER BY active DESC, role, name')
+		totp_enabled: boolean;
+	}>('SELECT id, email, name, role, active, last_login_at, totp_enabled FROM users ORDER BY active DESC, role, name')
 });
 
 export const actions: Actions = {
@@ -55,6 +56,14 @@ export const actions: Actions = {
 		if (!active) await query('DELETE FROM sessions WHERE user_id = $1', [id]);
 		await track(event, 'user.updated', { details: `user ${id}: role ${role}, ${active ? 'active' : 'turned off'}` });
 		return { message: 'Saved.' };
+	},
+
+	reset2fa: async (event) => {
+		const id = Number((await event.request.formData()).get('id'));
+		await query('UPDATE users SET totp_enabled = FALSE, totp_secret = NULL, totp_last_step = NULL WHERE id = $1', [id]);
+		await query('DELETE FROM sessions WHERE user_id = $1', [id]);
+		await track(event, 'user.2fa_reset', { details: `user ${id}` });
+		return { message: 'Two-step login reset. They can set it up again from their profile.' };
 	},
 
 	password: async (event) => {

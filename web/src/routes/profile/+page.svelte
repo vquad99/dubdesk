@@ -1,15 +1,17 @@
 <script lang="ts">
 	import ProfileView from '#lib/components/ProfileView.svelte';
+	import SecurityPanel from '#lib/components/SecurityPanel.svelte';
 	import type { PageProps } from './$types';
 
-	let { data }: PageProps = $props();
+	let { data, form }: PageProps = $props();
 </script>
 
 <div class="page-head">
 	<div>
 		<span class="eyebrow">My profile</span>
-		<p class="sub">Your progress, your jobs and everything you have done here.</p>
+		<p class="sub">Your progress, your jobs, your security and everything you have done here.</p>
 	</div>
 </div>
 
 <ProfileView p={data.p} activity={data.activity} self />
+<SecurityPanel security={data.security} {form} />

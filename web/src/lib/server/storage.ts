@@ -51,19 +51,45 @@ export async function writeStream(key: string, body: ReadableStream<Uint8Array>)
 	});
 }
 
-/** A Response for a stored file, honouring Range so video can seek without downloading it all. */
-export async function serve(key: string, mime: string, range: string | null, download?: string): Promise<Response> {
-	const size = await sizeOf(key);
-	if (size === null) return new Response('Not found', { status: 404 });
+export type ServeOptions = {
+	range?: string | null;
+	ifNoneMatch?: string | null;
+	ifRange?: string | null;
+	download?: string;
+	encoding?: string; // e.g. 'gzip' when the stored file is already compressed
+	maxAge?: number; // seconds the browser may reuse it without asking
+};
+
+/**
+ * A Response for a stored file. Honours Range (seeking fetches only the part needed),
+ * ETag / If-None-Match (a file the browser already has costs a 304, no data), and If-Range.
+ */
+export async function serve(key: string, mime: string, opts: ServeOptions = {}): Promise<Response> {
+	let st;
+	try {
+		st = await stat(pathFor(key));
+	} catch {
+		return new Response('Not found', { status: 404 });
+	}
+	const size = st.size;
+	const etag = `"${size.toString(36)}-${Math.floor(st.mtimeMs).toString(36)}"`;
 	const headers: Record<string, string> = {
 		'Content-Type': mime,
 		'Accept-Ranges': 'bytes',
-		'Cache-Control': 'private, max-age=3600'
+		'Cache-Control': `private, max-age=${opts.maxAge ?? 86400}`,
+		ETag: etag,
+		'Last-Modified': st.mtime.toUTCString()
 	};
-	if (download) headers['Content-Disposition'] = `attachment; filename="${download.replace(/"/g, '')}"`;
+	if (opts.encoding) headers['Content-Encoding'] = opts.encoding;
+	if (opts.download) headers['Content-Disposition'] = `attachment; filename="${opts.download.replace(/"/g, '')}"`;
 
-	const m = range?.match(/^bytes=(\d*)-(\d*)$/);
-	if (m && (m[1] || m[2])) {
+	if (opts.ifNoneMatch && opts.ifNoneMatch.split(/\s*,\s*/).includes(etag)) {
+		return new Response(null, { status: 304, headers });
+	}
+
+	const m = opts.range?.match(/^bytes=(\d*)-(\d*)$/);
+	const rangeValid = !opts.ifRange || opts.ifRange === etag;
+	if (m && (m[1] || m[2]) && rangeValid && !opts.encoding) {
 		let start = m[1] ? Number(m[1]) : size - Number(m[2]);
 		let end = m[1] && m[2] ? Number(m[2]) : size - 1;
 		start = Math.max(0, start);

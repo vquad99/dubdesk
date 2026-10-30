@@ -1,4 +1,10 @@
 <script lang="ts">
+	// Fonts ship with the app (no third-party requests); the browser fetches only the
+	// character ranges a page uses, e.g. Devanagari only where Hindi appears.
+	import '@fontsource-variable/figtree';
+	import '@fontsource-variable/noto-sans-devanagari';
+	import '@fontsource/jetbrains-mono/400.css';
+	import '@fontsource/jetbrains-mono/500.css';
 	import '../app.css';
 	import favicon from '#lib/assets/favicon.svg';
 	import { page } from '$app/state';
@@ -34,12 +40,6 @@
 
 <svelte:head>
 	<link rel="icon" href={favicon} />
-	<link rel="preconnect" href="https://fonts.googleapis.com" />
-	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
-	<link
-		rel="stylesheet"
-		href="https://fonts.googleapis.com/css2?family=Figtree:wght@300..800&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+Devanagari:wght@400..600&display=swap"
-	/>
 	<title>DubDesk</title>
 </svelte:head>
 

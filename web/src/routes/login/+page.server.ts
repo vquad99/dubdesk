@@ -29,8 +29,8 @@ export const actions: Actions = {
 			return fail(429, { email, error: `Too many tries. Try again in ${wait} min.` });
 		}
 
-		const rows = await query<SessionUser & { password_hash: string }>(
-			'SELECT id, email, name, role, password_hash FROM users WHERE email = $1 AND active',
+		const rows = await query<SessionUser & { password_hash: string; totp_enabled: boolean }>(
+			'SELECT id, email, name, role, password_hash, totp_enabled FROM users WHERE email = $1 AND active',
 			[email]
 		);
 		const user = rows[0];
@@ -41,11 +41,19 @@ export const actions: Actions = {
 		}
 
 		await clearLoginFailures(email);
-		await createSession(cookies, user.id, url.protocol === 'https:');
-		await track(event, 'auth.login', { userId: user.id });
-
-		// Only follow a same-site path, never an outside URL.
 		const next = url.searchParams.get('next');
-		redirect(303, next && next.startsWith('/') && !next.startsWith('//') ? next : homeFor(user.role));
+		const safeNext = next && next.startsWith('/') && !next.startsWith('//') ? next : null;
+		const meta = { ip, userAgent: request.headers.get('user-agent') };
+
+		if (user.totp_enabled) {
+			// Password is right; the session grants nothing until the 2-step code is given.
+			await createSession(cookies, user.id, url.protocol === 'https:', { ...meta, pending2fa: true });
+			await track(event, 'auth.password_ok', { userId: user.id, details: 'waiting for 2-step code' });
+			redirect(303, `/login/2fa${safeNext ? `?next=${encodeURIComponent(safeNext)}` : ''}`);
+		}
+
+		await createSession(cookies, user.id, url.protocol === 'https:', meta);
+		await track(event, 'auth.login', { userId: user.id });
+		redirect(303, safeNext ?? homeFor(user.role));
 	}
 };

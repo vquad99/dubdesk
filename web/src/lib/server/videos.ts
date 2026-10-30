@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { appendFile, rm } from 'node:fs/promises';
 import { query, tx } from './db.ts';
-import { buildPeaks, probeDuration } from './media.ts';
+import { buildPeaks, gzipFile, makeAudioCopy, makeWebCopy, probe, probeDuration } from './media.ts';
 import { ensureDirFor, moveInto, sizeOf, tempPath, writeStream } from './storage.ts';
 import * as sarvam from './sarvam.ts';
 import { pairCues, parseSubtitles, type Cue } from '../srt.ts';
@@ -14,6 +14,9 @@ const EXT = /\.(mp4|mov|mkv|webm|avi|flv|wmv|wav|mp3|m4a)$/i;
 export const sourceKey = (id: number, name: string) => `videos/${id}/source${(name.match(EXT)?.[0] ?? '.mp4').toLowerCase()}`;
 export const dubbedKey = (id: number) => `videos/${id}/dubbed.mp4`;
 export const peaksKey = (id: number) => `videos/${id}/peaks.bin`;
+export const webKey = (id: number) => `videos/${id}/web.mp4`;
+export const audioKey = (id: number) => `videos/${id}/audio.m4a`;
+export const dubbedAudioKey = (id: number) => `videos/${id}/dubbed-audio.m4a`;
 
 export function checkUpload(name: string, size: number, mime: string): string | null {
 	if (!EXT.test(name)) return 'Use MP4, MOV, MKV, WebM, AVI, FLV, WMV, WAV, MP3 or M4A.';
@@ -80,8 +83,12 @@ export async function cancelUpload(u: UploadRow) {
 export async function processVideo(videoId: number) {
 	try {
 		const [v] = await query<{ source_key: string }>('SELECT source_key FROM videos WHERE id = $1', [videoId]);
+		// Refuse anything that is not really audio/video, whatever its name says.
+		const info = await probe(v.source_key);
+		if (!info.vcodec && !info.acodec) throw new Error('This file has no video or sound in it.');
 		const duration = await probeDuration(v.source_key);
 		await buildPeaks(v.source_key, peaksKey(videoId));
+		await gzipFile(peaksKey(videoId));
 		const [{ n }] = await query<{ n: number }>('SELECT COUNT(*)::int AS n FROM segments WHERE video_id = $1 AND deleted_at IS NULL', [videoId]);
 		await query(
 			`UPDATE videos SET duration_sec = $2, peaks_key = $3, size_bytes = COALESCE(size_bytes, $4), error = NULL,
@@ -90,12 +97,52 @@ export async function processVideo(videoId: number) {
 			[videoId, duration, peaksKey(videoId), await sizeOf(v.source_key), n]
 		);
 		if (n > 0) await ensureJob(videoId, null);
+		void optimiseMedia(videoId, 'source'); // review can start meanwhile, on the original file
 	} catch (e) {
 		console.error(`[video ${videoId}] processing failed`, e);
 		await query(`UPDATE videos SET status = 'failed', error = $2, updated_at = now() WHERE id = $1`, [
 			videoId,
 			(e as Error).message.slice(0, 1000)
 		]);
+	}
+}
+
+/**
+ * Build the streaming copy and the sound-only copy. Runs after the video is usable, so a
+ * long re-encode never delays review; the player switches to the lighter files once ready.
+ */
+export async function optimiseMedia(videoId: number, which: 'source' | 'dubbed') {
+	try {
+		const [v] = await query<{ source_key: string | null; dubbed_key: string | null; size_bytes: string | null }>(
+			'SELECT source_key, dubbed_key, size_bytes FROM videos WHERE id = $1',
+			[videoId]
+		);
+		if (which === 'source' && v?.source_key) {
+			if ((await sizeOf(peaksKey(videoId) + '.gz')) === null && (await sizeOf(peaksKey(videoId))) !== null) await gzipFile(peaksKey(videoId));
+			const web = await makeWebCopy(v.source_key, webKey(videoId));
+			let audioBytes: number | null = null;
+			try {
+				audioBytes = await makeAudioCopy(v.source_key, audioKey(videoId));
+			} catch {
+				/* silent video: no sound-only copy */
+			}
+			const mb = (n: number) => `${(n / 1048576).toFixed(1)} MB`;
+			await query(`UPDATE videos SET web_key = $2, audio_key = $3, media_note = $4 WHERE id = $1`, [
+				videoId,
+				webKey(videoId),
+				audioBytes ? audioKey(videoId) : null,
+				`upload ${v.size_bytes ? mb(Number(v.size_bytes)) : '?'} → streaming copy ${mb(web.bytes)} (${web.mode === 'repack' ? 'repacked, same quality' : 're-encoded'})` +
+					(audioBytes ? `, sound only ${mb(audioBytes)}` : '')
+			]);
+		}
+		if (which === 'dubbed' && v?.dubbed_key) {
+			await makeAudioCopy(v.dubbed_key, dubbedAudioKey(videoId));
+			await query(`UPDATE videos SET dubbed_audio_key = $2 WHERE id = $1`, [videoId, dubbedAudioKey(videoId)]);
+		}
+	} catch (e) {
+		// The original file still plays; only the savings are missing.
+		console.error(`[video ${videoId}] media optimisation (${which}) failed`, e);
+		await query(`UPDATE videos SET media_note = $2 WHERE id = $1`, [videoId, `optimise failed: ${(e as Error).message.slice(0, 300)}`]);
 	}
 }
 
@@ -214,6 +261,7 @@ export async function pollSarvam(videoId: number, jobId: string, sarvamStatus: s
 	const enText = enEntry ? await (await fetch(enEntry.download_url!)).text() : null;
 
 	await query(`UPDATE videos SET dubbed_key = $2, sarvam_status = 'exported', next_poll_at = NULL WHERE id = $1`, [videoId, dubbedKey(videoId)]);
+	void optimiseMedia(videoId, 'dubbed');
 	await query(`UPDATE videos SET status = 'uploaded' WHERE id = $1 AND status = 'dubbing'`, [videoId]);
 	await importSubtitles(videoId, null, enText, hiText);
 }

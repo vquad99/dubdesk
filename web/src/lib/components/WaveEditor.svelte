@@ -391,7 +391,7 @@
 		top: 6px;
 		left: 8px;
 		right: 8px;
-		font-family: 'Noto Sans Devanagari', var(--font);
+		font-family: 'Noto Sans Devanagari Variable', var(--font);
 		font-size: 12px;
 		line-height: 1.35;
 		color: var(--text-2);

@@ -363,7 +363,7 @@
 	}
 	.hi,
 	.diff p {
-		font-family: 'Noto Sans Devanagari', var(--font);
+		font-family: 'Noto Sans Devanagari Variable', var(--font);
 		font-size: 15.5px;
 		line-height: 1.7;
 	}
@@ -405,7 +405,7 @@
 		text-decoration: line-through;
 		padding: 2px 8px;
 		border-radius: 6px;
-		font-family: 'Noto Sans Devanagari', var(--font);
+		font-family: 'Noto Sans Devanagari Variable', var(--font);
 	}
 	.err {
 		display: flex;

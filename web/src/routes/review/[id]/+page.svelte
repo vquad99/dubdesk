@@ -32,7 +32,8 @@
 		Maximize,
 		Search,
 		Clock3,
-		MessageSquare
+		MessageSquare,
+		Headphones
 	} from '@lucide/svelte';
 	import VideoPlayer from '#lib/components/VideoPlayer.svelte';
 	import WaveEditor, { parsePeaks, type Peaks, type WaveLine } from '#lib/components/WaveEditor.svelte';
@@ -105,6 +106,29 @@
 	let range = $state<{ start: number; end: number } | null>(null);
 	let rate = $state(1);
 	let editTiming = $state(false);
+	// Sound only: about a tenth of the data. On by itself on slow or data-saver connections; remembered per browser.
+	let soundOnly = $state(false);
+	const audioSrc = $derived(
+		track === 'original' ? (job.audio_key ? media('audio') : null) : job.dubbed_audio_key ? media('dubbed-audio') : null
+	);
+	onMount(() => {
+		let saved: string | null = null;
+		try {
+			saved = localStorage.getItem('dubdesk.soundOnly');
+		} catch {
+			/* storage blocked */
+		}
+		const c = (navigator as Navigator & { connection?: { saveData?: boolean; effectiveType?: string } }).connection;
+		soundOnly = saved !== null ? saved === '1' : !!(c?.saveData || /(^|-)2g|3g/.test(c?.effectiveType ?? ''));
+	});
+	function setSoundOnly(v: boolean) {
+		soundOnly = v;
+		try {
+			localStorage.setItem('dubdesk.soundOnly', v ? '1' : '0');
+		} catch {
+			/* storage blocked */
+		}
+	}
 	const short = (t: number) => clock(t).slice(0, 5);
 	let peaks = $state<Peaks | null>(null);
 	const length = $derived(Number(job.duration_sec) || Math.max(0, ...lines.map((l) => l.end)));
@@ -515,6 +539,9 @@
 				bind:rate
 				{length}
 				{src}
+				{audioSrc}
+				audioOnly={soundOnly}
+				watermark={data.user ? `${data.user.email} · DubDesk` : ''}
 				fill
 				controls={false}
 				emptyText={track === 'dubbed' ? 'The Hindi video arrives from Sarvam after dubbing.' : 'No English video file yet.'}
@@ -617,6 +644,13 @@
 			</div>
 
 			<div class="right">
+				<button
+					class="sm sound"
+					class:primary={soundOnly}
+					disabled={!audioSrc}
+					title={audioSrc ? 'Listen without the picture: about a tenth of the data' : 'Sound-only copy is still being prepared'}
+					onclick={() => setSoundOnly(!soundOnly)}
+				><Headphones size={14} /> Sound only</button>
 				<label class="follow"><input type="checkbox" bind:checked={follow} /> Follow</label>
 				<div class="zoom">
 					<button class="ghost icon-only" title="Zoom out (−)" aria-label="Zoom out" onclick={() => wave?.zoomBy(0.8)}><ZoomOut size={15} /></button>
@@ -1013,7 +1047,7 @@
 		width: 100%;
 		margin: -6px 0 0 -9px;
 		padding: 6px 9px;
-		font-family: 'Noto Sans Devanagari', var(--font);
+		font-family: 'Noto Sans Devanagari Variable', var(--font);
 		font-size: 16px;
 		line-height: 1.7;
 		resize: none;
@@ -1088,7 +1122,7 @@
 		color: var(--text-2);
 	}
 	.orig [lang='hi'] {
-		font-family: 'Noto Sans Devanagari', var(--font);
+		font-family: 'Noto Sans Devanagari Variable', var(--font);
 		text-decoration: line-through;
 		text-decoration-color: rgba(0, 0, 0, 0.25);
 	}
@@ -1237,7 +1271,7 @@
 		padding: 10px 14px;
 		border-radius: 12px;
 		background: var(--surface-2);
-		font-family: 'Noto Sans Devanagari', var(--font);
+		font-family: 'Noto Sans Devanagari Variable', var(--font);
 	}
 	.summary {
 		display: grid;

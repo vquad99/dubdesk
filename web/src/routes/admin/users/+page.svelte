@@ -47,7 +47,7 @@
 <section class="card">
 	<div class="table-wrap">
 		<table>
-			<thead><tr><th>Person</th><th>Role</th><th>Status</th><th>Last login</th><th></th></tr></thead>
+			<thead><tr><th>Person</th><th>Role</th><th>Status</th><th>2-step</th><th>Last login</th><th></th></tr></thead>
 			<tbody>
 				{#each data.users as u (u.id)}
 					<tr class:inactive={!u.active}>
@@ -59,6 +59,15 @@
 						</td>
 						<td><Badge label={u.role[0].toUpperCase() + u.role.slice(1)} tone={ROLE_TONE[u.role as keyof typeof ROLE_TONE]} /></td>
 						<td><Badge label={u.active ? 'Active' : 'Turned off'} tone={u.active ? 'ok' : 'neutral'} /></td>
+						<td>
+							{#if u.totp_enabled}
+								<form method="POST" action="?/reset2fa" use:enhance={done} class="inline">
+									<input type="hidden" name="id" value={u.id} />
+									<Badge label="On" tone="ok" />
+									<button class="ghost sm" title="Use when they lost their phone">Reset</button>
+								</form>
+							{:else}<Badge label="Off" tone="neutral" />{/if}
+						</td>
 						<td class="faint">{u.last_login_at ? ago(u.last_login_at) : 'Never'}</td>
 						<td class="right">
 							<button class="ghost icon-only" title="Edit role" aria-label="Edit {u.name}" onclick={() => ((picked = u), (editOpen = true))}><Pencil size={15} /></button>
@@ -145,6 +154,11 @@
 	}
 	.person .muted {
 		font-size: 13px;
+	}
+	.inline {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
 	}
 	.right {
 		text-align: right;

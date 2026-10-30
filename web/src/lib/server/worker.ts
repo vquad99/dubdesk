@@ -2,7 +2,7 @@ import { rm } from 'node:fs/promises';
 import { query } from './db.ts';
 import { sarvamEnabled } from './sarvam.ts';
 import { tempPath } from './storage.ts';
-import { pollSarvam, processVideo } from './videos.ts';
+import { optimiseMedia, pollSarvam, processVideo } from './videos.ts';
 
 const TICK_MS = 15_000;
 const g = globalThis as unknown as { __dubdeskWorker?: ReturnType<typeof setInterval> };
@@ -40,6 +40,15 @@ async function tick() {
 		  RETURNING id`
 	);
 	for (const v of stuck) void processVideo(v.id);
+
+	// Older videos (or ones processed before streaming copies existed) get them now, one at a time.
+	const [todo] = await query<{ id: number }>(
+		`UPDATE videos SET media_note = 'optimising…'
+		  WHERE id = (SELECT id FROM videos WHERE web_key IS NULL AND peaks_key IS NOT NULL AND source_key IS NOT NULL
+		                AND media_note IS NULL ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED)
+		  RETURNING id`
+	);
+	if (todo) void optimiseMedia(todo.id, 'source');
 
 	// Uploads abandoned for a day: drop the half file and its empty video.
 	const dead = await query<{ id: string; video_id: number }>(

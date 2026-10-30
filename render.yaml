@@ -34,6 +34,9 @@ services:
         value: 8M
       - key: PG_POOL_MAX
         value: "20"
+      # Encrypts two-step login secrets. Generated once by Render; never change it after people turn 2-step on.
+      - key: APP_SECRET
+        generateValue: true
       # Sarvam Dubbing (Editor Flow). Set the key in the Render dashboard; never commit it.
       - key: SARVAM_API_KEY
         sync: false

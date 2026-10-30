@@ -99,12 +99,14 @@ export type JobRow = {
 	source_key: string | null;
 	dubbed_key: string | null;
 	peaks_key: string | null;
+	audio_key: string | null;
+	dubbed_audio_key: string | null;
 };
 
 export async function loadJob(jobId: number) {
 	const [job] = await query<JobRow>(
 		`SELECT j.id, j.video_id, j.round, j.status, j.assigned_to, j.assigned_at, j.locked_until, j.admin_note,
-		        v.title, v.duration_sec, v.source_key, v.dubbed_key, v.peaks_key
+		        v.title, v.duration_sec, v.source_key, v.dubbed_key, v.peaks_key, v.audio_key, v.dubbed_audio_key
 		   FROM jobs j JOIN videos v ON v.id = j.video_id WHERE j.id = $1`,
 		[jobId]
 	);

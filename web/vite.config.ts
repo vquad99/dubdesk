@@ -11,7 +11,29 @@ export default defineConfig({
 					filename.split(/[/\\]/).includes('node_modules') ? undefined : true
 			},
 
-			adapter: adapter()
+			adapter: adapter(),
+
+			// Content Security Policy: scripts only from this site (each page's own scripts get a
+			// one-time nonce), no plugins, no framing, no outside connections.
+			csp: {
+				mode: 'auto',
+				directives: {
+					'default-src': ['self'],
+					'script-src': ['self'],
+					'style-src': ['self', 'unsafe-inline'],
+					'img-src': ['self', 'data:', 'blob:'],
+					'font-src': ['self', 'data:'],
+					'media-src': ['self', 'blob:'],
+					'connect-src': ['self'],
+					'worker-src': ['self', 'blob:'],
+					'object-src': ['none'],
+					'base-uri': ['self'],
+					'form-action': ['self'],
+					'frame-ancestors': ['none'],
+					'frame-src': ['none'],
+					'manifest-src': ['self']
+				}
+			}
 		})
 	]
 });
