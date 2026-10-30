@@ -1,0 +1,46 @@
+services:
+  - type: web
+    name: dubdesk
+    runtime: node
+    plan: standard
+    region: singapore
+    buildCommand: cd web && npm ci && npm run build
+    startCommand: cd web && npm run migrate && npm start
+    healthCheckPath: /healthz
+    # Uploaded videos, Hindi dubs and waveforms. A disk ties the service to one instance;
+    # move storage to S3 (src/lib/server/storage.ts) before scaling out to more instances.
+    disk:
+      name: media
+      mountPath: /var/data
+      sizeGB: 100
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: dubdesk-db
+          property: connectionString
+      - key: MEDIA_DIR
+        value: /var/data/media
+      # Render terminates HTTPS in front of the app; these tell the app the real protocol and visitor address.
+      - key: PROTOCOL_HEADER
+        value: x-forwarded-proto
+      - key: ADDRESS_HEADER
+        value: x-forwarded-for
+      - key: XFF_DEPTH
+        value: "1"
+      # Uploads arrive in 5 MB parts.
+      - key: BODY_SIZE_LIMIT
+        value: 8M
+      - key: PG_POOL_MAX
+        value: "20"
+      # Sarvam Dubbing (Editor Flow). Set the key in the Render dashboard; never commit it.
+      - key: SARVAM_API_KEY
+        sync: false
+      - key: SARVAM_STUDIO_URL
+        value: https://indus.sarvam.ai/
+
+databases:
+  - name: dubdesk-db
+    plan: basic-1gb
+    region: singapore
