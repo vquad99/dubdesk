@@ -1,5 +1,16 @@
 import pg from 'pg';
 
+/**
+ * TLS only for a database reached over the internet (a dotted host name, e.g. Render's
+ * External URL). Render's Internal URL host has no dots and local dev is localhost.
+ */
+export function needsTls(url: string): boolean {
+	if (/sslmode=disable/.test(url)) return false;
+	if (/sslmode=require/.test(url)) return true;
+	const host = new URL(url).hostname;
+	return host.includes('.') && host !== '127.0.0.1';
+}
+
 // Created on first use: the build imports this file without a DATABASE_URL.
 let pool: pg.Pool | undefined;
 
@@ -7,8 +18,7 @@ function getPool(): pg.Pool {
 	if (pool) return pool;
 	const connectionString = process.env.DATABASE_URL;
 	if (!connectionString) throw new Error('DATABASE_URL is not set');
-	// Render Postgres needs TLS from outside its network; local dev does not.
-	const ssl = /localhost|127\.0\.0\.1/.test(connectionString) ? false : { rejectUnauthorized: false };
+	const ssl = needsTls(connectionString) ? { rejectUnauthorized: false } : false;
 	pool = new pg.Pool({
 		connectionString,
 		ssl,

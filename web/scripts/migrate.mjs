@@ -6,7 +6,15 @@ import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 
 const dir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'db', 'migrations');
-const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
+const url = process.env.DATABASE_URL;
+if (!url) {
+	console.error('DATABASE_URL is not set. On Render, add it under Environment (use the Internal Database URL).');
+	process.exit(1);
+}
+// Same rule as src/lib/server/db.ts: TLS only for a dotted (internet) host.
+const host = new URL(url).hostname;
+const tls = !/sslmode=disable/.test(url) && (/sslmode=require/.test(url) || (host.includes('.') && host !== '127.0.0.1'));
+const client = new pg.Client({ connectionString: url, ssl: tls ? { rejectUnauthorized: false } : false });
 await client.connect();
 
 try {
