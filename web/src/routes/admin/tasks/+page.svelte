@@ -15,7 +15,7 @@
 		{ key: 'assigned', label: 'With reviewer' },
 		{ key: 'submitted', label: 'Waiting for check' },
 		{ key: 'approved', label: 'Approved' },
-		{ key: 'uploaded', label: 'Waiting for dub' },
+		{ key: 'uploaded', label: 'Needs lines' },
 		{ key: 'trouble', label: 'Given back 2+' },
 		{ key: 'on_hold', label: 'Stopped' },
 		{ key: 'failed', label: 'Failed' }
@@ -47,7 +47,7 @@
 	<button class="primary" onclick={() => (uploadOpen = true)}><Upload size={16} /> Upload video</button>
 </div>
 
-<UploadDialog bind:open={uploadOpen} />
+<UploadDialog bind:open={uploadOpen} sarvam={data.sarvam} />
 
 <section class="card">
 	<div class="bar">

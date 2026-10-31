@@ -25,12 +25,14 @@ export function checkUpload(name: string, size: number, mime: string): string | 
 	return null;
 }
 
-export async function startUpload(userId: number, title: string, name: string, size: number, mime: string) {
+export type LineSource = 'sarvam' | 'manual';
+
+export async function startUpload(userId: number, title: string, name: string, size: number, mime: string, lines: LineSource) {
 	return tx(async (q) => {
 		const [v] = await q<{ id: number }>(
-			`INSERT INTO videos (title, original_filename, status, uploaded_by, size_bytes, mime)
-			 VALUES ($1, $2, 'uploading', $3, $4, $5) RETURNING id`,
-			[title, name, userId, size, mime || 'application/octet-stream']
+			`INSERT INTO videos (title, original_filename, status, uploaded_by, size_bytes, mime, line_source)
+			 VALUES ($1, $2, 'uploading', $3, $4, $5, $6) RETURNING id`,
+			[title, name, userId, size, mime || 'application/octet-stream', lines]
 		);
 		const id = randomBytes(16).toString('hex');
 		await q(
@@ -41,7 +43,23 @@ export async function startUpload(userId: number, title: string, name: string, s
 	});
 }
 
-export type UploadRow = { id: string; video_id: number; user_id: number; file_name: string; mime: string; size_bytes: string; received: string; finished_at: Date | null };
+/** The Hindi (dubbed) video for a video that has no Sarvam dub: MP4 only, so every browser plays it. */
+export function checkDubbedUpload(name: string, size: number): string | null {
+	if (!/\.mp4$/i.test(name)) return 'The Hindi video must be an MP4 file.';
+	if (!(size > 0) || size > MAX_BYTES) return 'File must be between 1 byte and 4 GB.';
+	return null;
+}
+
+export async function startDubbedUpload(userId: number, videoId: number, name: string, size: number) {
+	const id = randomBytes(16).toString('hex');
+	await query(
+		`INSERT INTO uploads (id, video_id, user_id, file_name, mime, size_bytes, chunk_bytes, kind) VALUES ($1, $2, $3, $4, 'video/mp4', $5, $6, 'dubbed')`,
+		[id, videoId, userId, name, size, CHUNK_BYTES]
+	);
+	return { uploadId: id, videoId, chunkBytes: CHUNK_BYTES };
+}
+
+export type UploadRow = { id: string; video_id: number; user_id: number; file_name: string; mime: string; size_bytes: string; received: string; finished_at: Date | null; kind: 'source' | 'dubbed' };
 
 export async function getUpload(id: string) {
 	const [u] = await query<UploadRow>('SELECT * FROM uploads WHERE id = $1', [id]);
@@ -67,6 +85,13 @@ export async function writeChunk(u: UploadRow, offset: number, bytes: Uint8Array
 
 export async function finishUpload(u: UploadRow) {
 	if (Number(u.received) !== Number(u.size_bytes)) throw new Error('upload is not complete');
+	if (u.kind === 'dubbed') {
+		await moveInto(tempPath(u.id), dubbedKey(u.video_id));
+		await query('UPDATE uploads SET finished_at = now() WHERE id = $1', [u.id]);
+		await query(`UPDATE videos SET dubbed_key = $2, dubbed_audio_key = NULL, updated_at = now() WHERE id = $1`, [u.video_id, dubbedKey(u.video_id)]);
+		void optimiseMedia(u.video_id, 'dubbed'); // sound-only copy
+		return;
+	}
 	const key = sourceKey(u.video_id, u.file_name);
 	await moveInto(tempPath(u.id), key);
 	await query('UPDATE uploads SET finished_at = now() WHERE id = $1', [u.id]);
@@ -82,7 +107,10 @@ export async function cancelUpload(u: UploadRow) {
 /** Read the length and build the waveform. Then the video is ready for subtitles or dubbing. */
 export async function processVideo(videoId: number) {
 	try {
-		const [v] = await query<{ source_key: string }>('SELECT source_key FROM videos WHERE id = $1', [videoId]);
+		const [v] = await query<{ source_key: string; line_source: LineSource | null; uploaded_by: number | null }>(
+			'SELECT source_key, line_source, uploaded_by FROM videos WHERE id = $1',
+			[videoId]
+		);
 		// Refuse anything that is not really audio/video, whatever its name says.
 		const info = await probe(v.source_key);
 		if (!info.vcodec && !info.acodec) throw new Error('This file has no video or sound in it.');
@@ -98,6 +126,10 @@ export async function processVideo(videoId: number) {
 		);
 		if (n > 0) await ensureJob(videoId, null);
 		void optimiseMedia(videoId, 'source'); // review can start meanwhile, on the original file
+		// Chosen at upload: Sarvam dubs it and sends back the lines. (A failure shows on the task page.)
+		if (n === 0 && v.line_source === 'sarvam' && sarvam.sarvamEnabled()) {
+			await sendToSarvam(videoId, v.uploaded_by).catch((e) => console.error(`[video ${videoId}] sending to Sarvam failed`, e));
+		}
 	} catch (e) {
 		console.error(`[video ${videoId}] processing failed`, e);
 		await query(`UPDATE videos SET status = 'failed', error = $2, updated_at = now() WHERE id = $1`, [

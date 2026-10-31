@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Download, Check, ClipboardCheck, ArrowRight } from '@lucide/svelte';
+	import { Download, Check, ClipboardCheck, ArrowRight, Eye } from '@lucide/svelte';
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
 	import { toast } from '#lib/toast.svelte.ts';
@@ -92,6 +92,7 @@
 				<div class="foot">
 					<span class="muted small">{t.reviewer ? `Reviewer: ${t.reviewer}` : 'No reviewer yet'}{(t.job_status === 'approved' || t.job_status === 'done') && t.decided_by ? ` · Approved by ${t.decided_by}` : t.checking ? ` · ${t.checking} is checking` : ''}</span>
 					<div class="dls">
+						{#if t.job_id}<a class="btn btn-sm" href="/review/{t.job_id}" title="Play the English and Hindi video with both transcripts"><Eye size={14} /> Watch</a>{/if}
 						<a class="btn btn-sm" aria-disabled={!t.lines} href="/api/operator/videos/{t.video_id}/download/hi-srt"><Download size={14} /> Hindi SRT</a>
 						<a class="btn btn-sm" aria-disabled={!t.lines} href="/api/operator/videos/{t.video_id}/download/lines-csv"><Download size={14} /> Lines CSV</a>
 						<a class="btn btn-sm btn-primary" aria-disabled={t.video_status !== 'done' && t.job_status !== 'approved'} href="/api/operator/videos/{t.video_id}/download/dubbed"><Download size={14} /> Hindi video</a>

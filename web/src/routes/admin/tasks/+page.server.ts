@@ -1,4 +1,5 @@
 import { listTasks } from '#lib/server/jobs.ts';
+import { sarvamEnabled } from '#lib/server/sarvam.ts';
 import type { PageServerLoad } from './$types';
 
 const ALLOWED = new Set(['queued', 'assigned', 'submitted', 'approved', 'done', 'failed', 'uploaded', 'dubbing', 'processing', 'on_hold', 'trouble']);
@@ -14,5 +15,5 @@ export const load: PageServerLoad = async ({ url }) => {
 		limit: PER_PAGE,
 		offset: (page - 1) * PER_PAGE
 	});
-	return { status, q, page, perPage: PER_PAGE, total: tasks.total, tasks: [...tasks] };
+	return { status, q, page, perPage: PER_PAGE, total: tasks.total, tasks: [...tasks], sarvam: sarvamEnabled() };
 };

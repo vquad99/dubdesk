@@ -15,8 +15,12 @@
 		TriangleAlert,
 		CirclePause,
 		CirclePlay,
-		UserCheck
+		UserCheck,
+		Eye,
+		FileVideo
 	} from '@lucide/svelte';
+	import VideoPlayer from '#lib/components/VideoPlayer.svelte';
+	import { cancelUploadId, uploadFile } from '#lib/chunkUpload.ts';
 	import { invalidateAll } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import Badge from '#lib/components/Badge.svelte';
@@ -41,6 +45,47 @@
 	const dl = (kind: string) => `/api/operator/videos/${data.task.video_id}/download/${kind}`;
 	const working = $derived(['processing', 'dubbing', 'uploading'].includes(data.task.video_status));
 	let subsOpen = $state(false);
+
+	// Player: English or Hindi video, with the line under the play head in both languages.
+	let player = $state<VideoPlayer>();
+	let time = $state(0);
+	let track = $state<'original' | 'dubbed'>('original');
+	const src = $derived(track === 'original' ? (data.task.source_key ? `/api/media/${data.task.video_id}/source` : null) : data.task.dubbed_key ? `/api/media/${data.task.video_id}/dubbed` : null);
+	const now = $derived(data.segments.find((x) => time >= Number(x.start_sec) && time < Number(x.end_sec)) ?? null);
+	function seek(t: number) {
+		player?.seek(t);
+		time = t;
+	}
+
+	// Optional Hindi video upload (for videos Sarvam did not dub).
+	let dub = $state<File | null>(null);
+	let dubPct = $state(0);
+	let dubBusy = $state(false);
+	let dubAbort: AbortController | null = null;
+	let dubId: string | null = null;
+	async function sendDub() {
+		if (!dub) return;
+		dubBusy = true;
+		dubAbort = new AbortController();
+		const size = dub.size;
+		try {
+			await uploadFile(dub, { dubbedFor: data.task.video_id }, dubAbort.signal, (n) => (dubPct = Math.floor((n / size) * 100)), (id) => (dubId = id));
+			dubId = null;
+			dub = null;
+			toast('Hindi video added.');
+			await invalidateAll();
+		} catch (e) {
+			if (!dubAbort.signal.aborted) toast(`Hindi video upload failed: ${(e as Error).message}`, 'error', 8000);
+		} finally {
+			dubBusy = false;
+			dubPct = 0;
+		}
+	}
+	async function cancelDub() {
+		dubAbort?.abort();
+		await cancelUploadId(dubId);
+		dubId = null;
+	}
 
 	// While a file is processing or dubbing, refresh every 10 s so the page moves on by itself.
 	onMount(() => {
@@ -111,7 +156,6 @@
 			{#if data.job?.qa_by && data.job.qa_locked_until && new Date(data.job.qa_locked_until) > new Date()}
 				<form method="POST" action="?/freeCheck" use:enhance={after}><button disabled={busy}><Unlock size={16} /> Free the check</button></form>
 			{/if}
-			{#if data.job}<a class="btn" href="/review/{data.job.id}">View lines</a>{/if}
 		{:else if held}
 			<form method="POST" action="?/resume" use:enhance={after}>
 				<button disabled={busy}><CirclePlay size={16} /> Resume</button>
@@ -121,7 +165,7 @@
 				<button disabled={busy}><Unlock size={16} /> Take back from reviewer</button>
 			</form>
 		{:else if status === 'uploaded' || data.task.video_status === 'failed'}
-			<button onclick={() => (subsOpen = true)}><FileText size={16} /> Load subtitles</button>
+			<button onclick={() => (subsOpen = true)}><FileText size={16} /> Load transcripts</button>
 			{#if data.task.source_key}
 				<form method="POST" action="?/sarvam" use:enhance={after}>
 					<button class="primary" disabled={busy || !data.sarvam} title={data.sarvam ? 'Dub this video with Sarvam (Editor Flow)' : 'Add SARVAM_API_KEY to turn this on'}>
@@ -130,11 +174,14 @@
 				</form>
 			{/if}
 		{:else if status === 'queued'}
-			<button onclick={() => (subsOpen = true)}><FileText size={16} /> Replace subtitles</button>
+			<button onclick={() => (subsOpen = true)}><FileText size={16} /> Replace transcripts</button>
 		{/if}
 		{#if canManage}
 			{#if !held}<button class="danger" onclick={() => (holdOpen = true)}><CirclePause size={16} /> Stop</button>{/if}
 			<button class="primary" onclick={() => (assignOpen = true)}><UserCheck size={16} /> Assign to…</button>
+		{/if}
+		{#if data.job}
+			<a class="btn" href="/review/{data.job.id}"><Eye size={15} /> Open full view</a>
 		{/if}
 		{#if data.studio}
 			<a class="btn" href={data.studio} target="_blank" rel="noopener"><ExternalLink size={15} /> Open in Sarvam Studio</a>
@@ -142,7 +189,13 @@
 	</div>
 </div>
 
-{#if held}
+{#if !data.job && data.task.lines === 0 && ['uploaded', 'failed'].includes(data.task.video_status)}
+	<div class="alert warn fade-up">
+		<TriangleAlert size={18} />
+		<div><strong>Reviewers cannot get this video yet: it has no lines.</strong>
+			{data.sarvam ? 'Send it to Sarvam, or load the English and Hindi transcripts.' : 'Load the English and Hindi transcripts (Sarvam is not connected yet).'} It goes into the reviewers' queue as soon as it has lines.</div>
+	</div>
+{:else if held}
 	<div class="alert hold fade-up">
 		<CirclePause size={18} />
 		<div><strong>Stopped{data.job?.held_at ? ` ${ago(data.job.held_at)}` : ''}.</strong> Nobody can pick this video up until you resume it or assign it.
@@ -170,6 +223,44 @@
 	</section>
 {/if}
 
+<section class="card watch">
+	<div class="player">
+		<VideoPlayer
+			bind:this={player}
+			bind:time
+			{src}
+			length={Number(data.task.duration_sec ?? 0)}
+			watermark={data.user ? `${data.user.email} · DubDesk` : ''}
+			emptyText={track === 'dubbed' ? 'No Hindi video yet: it comes from Sarvam, or upload one below.' : 'No English video file yet.'}
+		/>
+	</div>
+	<div class="now">
+		<div class="toggle" role="group" aria-label="Which video">
+			<button class:on={track === 'original'} onclick={() => (track = 'original')}>English video</button>
+			<button class:on={track === 'dubbed'} onclick={() => (track = 'dubbed')} title={data.task.dubbed_key ? '' : 'No Hindi video yet'}>Hindi video{data.task.dubbed_key ? '' : ' (none yet)'}</button>
+		</div>
+		{#if now}
+			<p class="eyebrow">Line at {clock(now.start_sec)}</p>
+			<p class="cap en">{now.en_text || '—'}</p>
+			<p class="cap hi" lang="hi">{now.hi_text || '—'}</p>
+		{:else}
+			<p class="muted small">{data.segments.length ? 'Play the video: the English and Hindi line show here.' : 'No lines yet.'}</p>
+		{/if}
+		{#if !data.task.sarvam_job_id && data.task.source_key}
+			<div class="dubup">
+				<p class="eyebrow">{data.task.dubbed_key ? 'Replace the Hindi video' : 'Add the Hindi video'}</p>
+				{#if dubBusy}
+					<div class="progress"><span style:width="{dubPct}%"></span></div>
+					<span class="muted small">{dubPct}% · <button class="ghost sm" onclick={cancelDub}>Cancel</button></span>
+				{:else}
+					<label class="pickdub"><FileVideo size={15} /> <span>{dub ? dub.name : 'Choose an MP4'}</span><input type="file" accept=".mp4,video/mp4" onchange={(e) => (dub = (e.target as HTMLInputElement).files?.[0] ?? null)} /></label>
+					{#if dub}<button class="primary sm" onclick={sendDub}>Upload</button>{/if}
+				{/if}
+			</div>
+		{/if}
+	</div>
+</section>
+
 <div class="layout">
 	<section class="card">
 		<div class="card-head">
@@ -191,7 +282,7 @@
 					{@const edited = s.hi_text !== s.hi_text_original}
 					<li>
 						<div class="top">
-							<span class="mono time">{clock(s.start_sec)} – {clock(s.end_sec)}</span>
+							<button class="mono time seek" title="Play from here" onclick={() => seek(Number(s.start_sec))}>{clock(s.start_sec)} – {clock(s.end_sec)}</button>
 							{#if s.flag}<Badge label={FLAG_LABEL[s.flag]} tone="danger" />{/if}
 							{#if s.origin !== 'source'}<Badge label={s.origin === 'inserted' ? 'New line' : s.origin === 'split' ? 'Split off' : 'Joined'} tone="info" />{/if}
 							{#if moved(s)}<Badge label="Timing {clock(s.start_sec_original ?? 0)}–{clock(s.end_sec_original ?? 0)} → {clock(s.start_sec)}–{clock(s.end_sec)}" tone="warn" />{/if}
@@ -305,9 +396,9 @@
 	</aside>
 </div>
 
-<Modal bind:open={subsOpen} title="Load subtitles">
+<Modal bind:open={subsOpen} title="Load transcripts">
 	<form id="subs" method="POST" action="?/subtitles" enctype="multipart/form-data" use:enhance={after} class="subs">
-		<p class="muted">Each Hindi line becomes one review line; English text is matched to it by time. Loading replaces the current lines.</p>
+		<p class="muted">Each Hindi line becomes one review line; English text is matched to it by time. Loading replaces the current lines, and the video goes into the reviewers' queue.</p>
 		<label class="field">English (SRT or VTT)<input type="file" name="en" accept=".srt,.vtt" /></label>
 		<label class="field">Hindi (SRT or VTT)<input type="file" name="hi" accept=".srt,.vtt" /></label>
 	</form>
@@ -351,6 +442,113 @@
 </Modal>
 
 <style>
+	.watch {
+		display: grid;
+		grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+		gap: 18px;
+		padding: 16px;
+		margin-bottom: 16px;
+	}
+	.player {
+		min-width: 0;
+	}
+	.now {
+		display: grid;
+		align-content: start;
+		gap: 8px;
+		min-width: 0;
+	}
+	.toggle {
+		display: inline-flex;
+		gap: 4px;
+		padding: 4px;
+		border-radius: 999px;
+		background: var(--surface-2);
+		justify-self: start;
+		margin-bottom: 6px;
+	}
+	.toggle button {
+		height: 30px;
+		padding: 0 14px;
+		border: 0;
+		border-radius: 999px;
+		background: transparent;
+		font-size: 13px;
+	}
+	.toggle button.on {
+		background: var(--panel);
+		box-shadow: 0 1px 3px rgb(0 0 0 / 0.12);
+	}
+	.cap {
+		margin: 0;
+		padding: 10px 12px;
+		border-radius: 12px;
+		background: var(--surface-2);
+		font-size: 15px;
+		line-height: 1.5;
+	}
+	.cap.hi {
+		background: var(--accent-soft);
+		font-size: 16px;
+	}
+	.dubup {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 8px;
+		margin-top: 10px;
+		padding-top: 12px;
+		border-top: 1px solid var(--line);
+	}
+	.dubup .eyebrow {
+		flex-basis: 100%;
+		margin: 0;
+	}
+	.dubup .progress {
+		flex: 1;
+	}
+	.pickdub {
+		position: relative;
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 7px 12px;
+		border-radius: 10px;
+		border: 1px solid var(--line);
+		font-size: 13px;
+		cursor: pointer;
+		max-width: 100%;
+		overflow: hidden;
+	}
+	.pickdub span {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.pickdub input {
+		position: absolute;
+		inset: 0;
+		opacity: 0;
+		cursor: pointer;
+	}
+	.seek {
+		height: auto;
+		padding: 0;
+		border: 0;
+		background: none;
+		color: inherit;
+		cursor: pointer;
+		font-weight: 400;
+	}
+	.seek:hover {
+		color: var(--accent);
+		text-decoration: underline;
+	}
+	@media (max-width: 860px) {
+		.watch {
+			grid-template-columns: 1fr;
+		}
+	}
 	.people {
 		display: flex;
 		gap: 22px;

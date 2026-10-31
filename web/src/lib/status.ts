@@ -4,7 +4,8 @@ export type Tone = 'neutral' | 'info' | 'warn' | 'accent' | 'ok' | 'danger';
 const STATUS: Record<string, { label: string; tone: Tone }> = {
 	// videos
 	uploading: { label: 'Uploading', tone: 'neutral' },
-	uploaded: { label: 'Uploaded', tone: 'neutral' },
+	uploaded: { label: 'Needs lines', tone: 'warn' },
+	processing: { label: 'Reading file', tone: 'info' },
 	dubbing: { label: 'Dubbing', tone: 'info' },
 	ready_for_review: { label: 'Ready for review', tone: 'warn' },
 	in_review: { label: 'In review', tone: 'info' },

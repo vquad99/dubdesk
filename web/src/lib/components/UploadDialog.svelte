@@ -1,15 +1,18 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { UploadCloud, FileVideo, FileText, X } from '@lucide/svelte';
+	import { UploadCloud, FileVideo, FileText, X, Sparkles, FileCheck } from '@lucide/svelte';
 	import Modal from './Modal.svelte';
 	import { toast } from '#lib/toast.svelte.ts';
+	import { cancelUploadId, uploadFile } from '#lib/chunkUpload.ts';
 
-	let { open = $bindable(false) }: { open?: boolean } = $props();
+	let { open = $bindable(false), sarvam = false }: { open?: boolean; sarvam?: boolean } = $props();
 
 	let title = $state('');
 	let file = $state<File | null>(null);
+	let source = $state<'sarvam' | 'manual' | null>(null);
 	let en = $state<File | null>(null);
 	let hi = $state<File | null>(null);
+	let dub = $state<File | null>(null);
 	let busy = $state(false);
 	let sent = $state(0);
 	let speed = $state(0);
@@ -18,8 +21,14 @@
 	let abort: AbortController | null = null;
 	let uploadId: string | null = null;
 
-	const pct = $derived(file ? Math.floor((sent / file.size) * 100) : 0);
+	const total = $derived((file?.size ?? 0) + (source === 'manual' && dub ? dub.size : 0));
+	const pct = $derived(total ? Math.floor((sent / total) * 100) : 0);
 	const mb = (n: number) => (n / 1024 / 1024).toFixed(n > 100 * 1024 * 1024 ? 0 : 1);
+	// Manual needs both transcripts: reviewers read the English and correct the Hindi.
+	const ready = $derived(!!file && !!title.trim() && (source === 'sarvam' ? sarvam : source === 'manual' && !!en && !!hi));
+	const missing = $derived(
+		!file ? 'Choose the video.' : !title.trim() ? 'Give it a title.' : !source ? 'Choose where the lines come from.' : source === 'manual' && (!en || !hi) ? 'Add both the English and the Hindi transcript.' : ''
+	);
 
 	function pick(f: File | null | undefined) {
 		if (!f) return;
@@ -27,79 +36,41 @@
 		if (!title) title = f.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim();
 	}
 
-	async function api(url: string, init?: RequestInit) {
-		const res = await fetch(url, { ...init, signal: abort?.signal });
-		if (!res.ok) {
-			let msg = res.statusText;
-			try {
-				msg = (await res.json()).message ?? msg;
-			} catch {
-				/* plain */
-			}
-			throw Object.assign(new Error(msg), { status: res.status });
-		}
-		return res.json();
-	}
-
-	async function putChunk(offset: number, blob: Blob): Promise<number> {
-		for (let attempt = 1; ; attempt++) {
-			try {
-				const out = await api(`/api/admin/uploads/${uploadId}?offset=${offset}`, {
-					method: 'PUT',
-					headers: { 'content-type': 'application/octet-stream' },
-					body: blob
-				});
-				return out.received;
-			} catch (e) {
-				if (abort?.signal.aborted) throw e;
-				if ((e as { status?: number }).status === 409) {
-					// Server has a different count than we think: ask and carry on from there.
-					return (await api(`/api/admin/uploads/${uploadId}`)).received;
-				}
-				if (attempt >= 5) throw e;
-				phase = `Connection lost — retrying (${attempt}/4)…`;
-				await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt));
-			}
-		}
-	}
-
 	async function start() {
-		if (!file || !title.trim()) return;
+		if (!ready || !file) return;
 		busy = true;
 		abort = new AbortController();
 		sent = 0;
+		const t0 = performance.now();
+		const progress = (base: number) => (n: number, note?: string) => {
+			sent = base + n;
+			speed = sent / ((performance.now() - t0) / 1000);
+			phase = note ?? 'Uploading';
+		};
 		try {
 			phase = 'Starting…';
-			const s = await api('/api/admin/uploads', {
-				method: 'POST',
-				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ title: title.trim(), name: file.name, size: file.size, mime: file.type })
-			});
-			uploadId = s.uploadId;
-			const t0 = performance.now();
-			let offset = 0;
-			while (offset < file.size) {
-				phase = 'Uploading';
-				offset = await putChunk(offset, file.slice(offset, offset + s.chunkBytes));
-				sent = offset;
-				speed = offset / ((performance.now() - t0) / 1000);
-			}
-			phase = 'Finishing…';
-			await api(`/api/admin/uploads/${uploadId}/complete`, { method: 'POST' });
-
-			if (en || hi) {
-				phase = 'Loading subtitles…';
+			const s = await uploadFile(file, { title: title.trim(), lines: source }, abort.signal, progress(0), (id) => (uploadId = id));
+			uploadId = null;
+			if (source === 'manual') {
+				if (dub) {
+					phase = 'Uploading the Hindi video…';
+					await uploadFile(dub, { dubbedFor: s.videoId }, abort.signal, progress(file.size), (id) => (uploadId = id));
+					uploadId = null;
+				}
+				phase = 'Loading transcripts…';
 				const fd = new FormData();
-				if (en) fd.set('en', en);
-				if (hi) fd.set('hi', hi);
-				const r = await api(`/api/admin/videos/${s.videoId}/subtitles`, { method: 'POST', body: fd });
-				toast(`Uploaded. ${r.lines} lines loaded from subtitles.`);
-			} else toast('Uploaded. Reading the audio now.');
+				fd.set('en', en!);
+				fd.set('hi', hi!);
+				const res = await fetch(`/api/admin/videos/${s.videoId}/subtitles`, { method: 'POST', body: fd });
+				const r = await res.json().catch(() => ({}));
+				if (!res.ok) throw new Error(`video uploaded, but the transcripts failed: ${r.message ?? res.statusText}. Open the task and load them again.`);
+				toast(`Uploaded. ${r.lines} lines loaded; reviewers can pick it up now.`);
+			} else toast('Uploaded. It goes to Sarvam as soon as the file is read; the lines arrive after dubbing.');
 			open = false;
 			reset();
 			await goto(`/admin/tasks/${s.videoId}`);
 		} catch (e) {
-			if (!abort?.signal.aborted) toast(`Upload failed: ${(e as Error).message}`, 'error', 7000);
+			if (!abort?.signal.aborted) toast(`Upload failed: ${(e as Error).message}`, 'error', 9000);
 		} finally {
 			busy = false;
 			phase = '';
@@ -108,14 +79,15 @@
 
 	async function cancel() {
 		abort?.abort();
-		if (uploadId) await fetch(`/api/admin/uploads/${uploadId}`, { method: 'DELETE' }).catch(() => {});
+		await cancelUploadId(uploadId);
 		reset();
 		busy = false;
 		toast('Upload cancelled.', 'info');
 	}
 	function reset() {
 		title = '';
-		file = en = hi = null;
+		file = en = hi = dub = null;
+		source = null;
 		sent = 0;
 		uploadId = null;
 	}
@@ -144,29 +116,48 @@
 			</label>
 			<label class="field">Title<input bind:value={title} placeholder="e.g. Transmission of Art — part 1" /></label>
 			<div class="subs">
-				<p class="eyebrow">Subtitles (optional)</p>
-				<p class="muted small">Have lines already? Load them now. Otherwise they come from Sarvam after dubbing.</p>
-				<div class="two">
-					<label class="sub">
-						<FileText size={16} />
-						<span>{en ? en.name : 'English SRT / VTT'}</span>
-						<input type="file" accept=".srt,.vtt" onchange={(e) => (en = (e.target as HTMLInputElement).files?.[0] ?? null)} />
-					</label>
-					<label class="sub">
-						<FileText size={16} />
-						<span>{hi ? hi.name : 'Hindi SRT / VTT'}</span>
-						<input type="file" accept=".srt,.vtt" onchange={(e) => (hi = (e.target as HTMLInputElement).files?.[0] ?? null)} />
-					</label>
+				<p class="eyebrow">Where do the lines come from? <span class="req">required</span></p>
+				<div class="choices" role="radiogroup" aria-label="Where the lines come from">
+					<button type="button" role="radio" aria-checked={source === 'sarvam'} class="choice" class:on={source === 'sarvam'} disabled={!sarvam} onclick={() => (source = 'sarvam')}>
+						<Sparkles size={18} />
+						<strong>Sarvam dubs it</strong>
+						<span>Sarvam makes the Hindi video and both transcripts. Reviewers get it when dubbing ends.</span>
+						{#if !sarvam}<em>Sarvam is not connected yet (no key added).</em>{/if}
+					</button>
+					<button type="button" role="radio" aria-checked={source === 'manual'} class="choice" class:on={source === 'manual'} onclick={() => (source = 'manual')}>
+						<FileCheck size={18} />
+						<strong>I have the transcripts</strong>
+						<span>Load English and Hindi SRT/VTT now. Reviewers can pick it up straight away.</span>
+					</button>
 				</div>
+				{#if source === 'manual'}
+					<div class="two">
+						<label class="sub" class:got={en}>
+							<FileText size={16} />
+							<span>{en ? en.name : 'English SRT / VTT *'}</span>
+							<input type="file" accept=".srt,.vtt" onchange={(e) => (en = (e.target as HTMLInputElement).files?.[0] ?? null)} />
+						</label>
+						<label class="sub" class:got={hi}>
+							<FileText size={16} />
+							<span>{hi ? hi.name : 'Hindi SRT / VTT *'}</span>
+							<input type="file" accept=".srt,.vtt" onchange={(e) => (hi = (e.target as HTMLInputElement).files?.[0] ?? null)} />
+						</label>
+						<label class="sub wide" class:got={dub}>
+							<FileVideo size={16} />
+							<span>{dub ? dub.name : 'Hindi (dubbed) video, MP4 — optional, so both videos play'}</span>
+							<input type="file" accept=".mp4,video/mp4" onchange={(e) => (dub = (e.target as HTMLInputElement).files?.[0] ?? null)} />
+						</label>
+					</div>
+				{/if}
 			</div>
 		</div>
 	{:else}
 		<div class="progressing">
-			<div class="row"><strong>{file?.name}</strong><span class="mono">{pct}%</span></div>
+			<div class="row"><strong>{file?.name}{source === 'manual' && dub ? ` + ${dub.name}` : ''}</strong><span class="mono">{pct}%</span></div>
 			<div class="progress big"><span style:width="{pct}%"></span></div>
 			<div class="row muted small">
 				<span>{phase}</span>
-				<span>{mb(sent)} / {file ? mb(file.size) : 0} MB{speed ? ` · ${mb(speed)} MB/s` : ''}</span>
+				<span>{mb(sent)} / {mb(total)} MB{speed ? ` · ${mb(speed)} MB/s` : ''}</span>
 			</div>
 		</div>
 	{/if}
@@ -175,7 +166,8 @@
 			<button class="ghost" onclick={cancel}><X size={15} /> Cancel upload</button>
 		{:else}
 			<button class="ghost" onclick={() => (open = false)}>Close</button>
-			<button class="primary" disabled={!file || !title.trim()} onclick={start}><UploadCloud size={16} /> Upload</button>
+			{#if missing}<span class="muted small hint">{missing}</span>{/if}
+			<button class="primary" disabled={!ready} onclick={start}><UploadCloud size={16} /> Upload</button>
 		{/if}
 	{/snippet}
 </Modal>
@@ -252,6 +244,70 @@
 	}
 	.sub:hover {
 		border-color: var(--accent-line);
+	}
+	.sub.wide {
+		grid-column: 1 / -1;
+	}
+	.sub.got {
+		border-color: var(--accent-line);
+		background: var(--accent-soft);
+		color: var(--text);
+	}
+	.req {
+		margin-left: 6px;
+		color: var(--danger, #c0392b);
+		text-transform: none;
+		letter-spacing: 0;
+	}
+	.choices {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 10px;
+	}
+	.choice {
+		display: grid;
+		justify-items: start;
+		align-content: start;
+		gap: 4px;
+		padding: 14px;
+		height: auto;
+		border-radius: 14px;
+		border: 1.5px solid var(--line);
+		background: var(--panel);
+		text-align: left;
+		white-space: normal;
+		font-weight: 400;
+	}
+	.choice strong {
+		font-weight: 500;
+		font-size: 14.5px;
+	}
+	.choice span,
+	.choice em {
+		font-size: 12.5px;
+		color: var(--muted);
+		line-height: 1.4;
+	}
+	.choice em {
+		font-style: normal;
+		color: #a14b00;
+	}
+	.choice.on {
+		border-color: var(--accent);
+		background: var(--accent-soft);
+	}
+	.choice:disabled {
+		opacity: 0.6;
+	}
+	.hint {
+		margin-right: auto;
+		align-self: center;
+	}
+	@media (max-width: 560px) {
+		.choices,
+		.two {
+			grid-template-columns: 1fr;
+		}
 	}
 	.progressing {
 		display: grid;
