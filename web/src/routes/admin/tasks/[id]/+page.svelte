@@ -94,6 +94,16 @@
 			<span class="chip">{data.task.lines} lines</span>
 			{#if data.task.round}<span class="chip">Round {data.task.round}</span>{/if}
 		</div>
+		<div class="people">
+			<span><span class="faint">Reviewer</span> <b>{data.task.reviewer ?? 'not taken yet'}</b></span>
+			<span><span class="faint">Operator</span>
+				{#if data.task.job_status === 'approved' || data.task.job_status === 'done'}<b>{data.task.decided_by ?? '—'}</b> <span class="faint">approved {data.task.decided_at ? when(data.task.decided_at) : ''}</span>
+				{:else if data.task.checking}<b>{data.task.checking}</b> <span class="faint">checking now</span>
+				{:else if data.task.job_status === 'submitted'}<span class="faint">waiting for a check</span>
+				{:else if data.task.sent_back && data.task.decided_by}<b>{data.task.decided_by}</b> <span class="faint">sent it back {data.task.sent_back}×</span>
+				{:else}<b>—</b>{/if}
+			</span>
+		</div>
 	</div>
 	<div class="actions">
 		{#if status === 'submitted'}
@@ -341,6 +351,16 @@
 </Modal>
 
 <style>
+	.people {
+		display: flex;
+		gap: 22px;
+		flex-wrap: wrap;
+		margin-top: 10px;
+		font-size: 14px;
+	}
+	.people b {
+		font-weight: 500;
+	}
 	.checking {
 		align-self: center;
 	}

@@ -572,6 +572,9 @@ export type TaskRow = {
 	locked_until: Date | null;
 	held_at: Date | null;
 	hold_reason: string | null;
+	decided_by: string | null; // operator who approved it, or last sent it back
+	decided_at: Date | null;
+	checking: string | null; // operator checking it right now
 	gave_back: number; // different people who gave it back or let it time out
 	sent_back: number; // times the admin sent it back
 	lines: number;
@@ -584,6 +587,8 @@ export type TaskRow = {
 const TASK_SELECT = `
 	SELECT v.id AS video_id, j.id AS job_id, v.title, v.duration_sec, v.status AS video_status,
 	       j.status AS job_status, j.round, u.name AS reviewer, j.locked_until, j.held_at, j.hold_reason,
+	       (SELECT name FROM users WHERE id = j.reviewed_by) AS decided_by, j.reviewed_at AS decided_at,
+	       (SELECT name FROM users WHERE id = j.qa_by AND j.status = 'submitted' AND j.qa_locked_until > now()) AS checking,
 	       (SELECT COUNT(DISTINCT e.user_id)::int FROM job_events e JOIN jobs jj ON jj.id = e.job_id
 	         WHERE jj.video_id = v.id AND e.action IN ('released', 'expired')) AS gave_back,
 	       (SELECT COUNT(*)::int FROM job_events e JOIN jobs jj ON jj.id = e.job_id
@@ -627,7 +632,7 @@ export async function listTasks(opts: { status?: string; q?: string; limit?: num
 			   LEFT JOIN users u ON u.id = j.assigned_to
 			   ${cond} ORDER BY v.updated_at DESC, v.id DESC LIMIT ${limit} OFFSET ${offset})
 			 ${TASK_SELECT} WHERE v.id IN (SELECT id FROM page)
-			 GROUP BY v.id, j.id, j.status, j.round, u.name, j.locked_until, j.held_at, j.hold_reason
+			 GROUP BY v.id, j.id, j.status, j.round, u.name, j.locked_until, j.held_at, j.hold_reason, j.reviewed_by, j.reviewed_at, j.qa_by, j.qa_locked_until
 			 ORDER BY v.updated_at DESC, v.id DESC`,
 			params
 		),
@@ -643,7 +648,7 @@ export async function listTasks(opts: { status?: string; q?: string; limit?: num
 
 export async function loadTask(videoId: number) {
 	const [task] = await query<TaskRow & { error: string | null; source_key: string | null; dubbed_key: string | null; peaks_key: string | null; sarvam_job_id: string | null; sarvam_status: string | null; sarvam_progress: number | null; original_filename: string; size_bytes: string | null }>(
-		`${TASK_SELECT.replace('v.updated_at', 'v.updated_at, v.error, v.source_key, v.dubbed_key, v.peaks_key, v.sarvam_job_id, v.sarvam_status, v.sarvam_progress, v.original_filename, v.size_bytes')} WHERE v.id = $1 GROUP BY v.id, j.id, j.status, j.round, u.name, j.locked_until, j.held_at, j.hold_reason`,
+		`${TASK_SELECT.replace('v.updated_at', 'v.updated_at, v.error, v.source_key, v.dubbed_key, v.peaks_key, v.sarvam_job_id, v.sarvam_status, v.sarvam_progress, v.original_filename, v.size_bytes')} WHERE v.id = $1 GROUP BY v.id, j.id, j.status, j.round, u.name, j.locked_until, j.held_at, j.hold_reason, j.reviewed_by, j.reviewed_at, j.qa_by, j.qa_locked_until`,
 		[videoId]
 	);
 	if (!task) return null;

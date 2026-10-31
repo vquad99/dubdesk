@@ -71,7 +71,7 @@
 		<div class="table-wrap">
 			<table>
 				<thead>
-					<tr><th>Video</th><th>Status</th><th>Reviewer</th><th>Checked</th><th>Edits</th><th>Updated</th></tr>
+					<tr><th>Video</th><th>Status</th><th>Reviewer</th><th>Operator</th><th>Lines checked</th><th>Edits</th><th>Updated</th></tr>
 				</thead>
 				<tbody>
 					{#each data.tasks as t (t.video_id)}
@@ -89,6 +89,13 @@
 								{#if t.reviewer}
 									<span class="person"><span class="avatar sm">{t.reviewer.slice(0, 1)}</span>{t.reviewer}</span>
 								{:else}<span class="faint">Not taken</span>{/if}
+							</td>
+							<td>
+								{#if t.job_status === 'approved' || t.job_status === 'done'}<span class="who-op"><b>{t.decided_by ?? '—'}</b><span class="faint">approved {t.decided_at ? ago(t.decided_at) : ''}</span></span>
+								{:else if t.checking}<span class="who-op"><b>{t.checking}</b><span class="faint">checking now</span></span>
+								{:else if t.job_status === 'submitted'}<span class="faint">waiting for check</span>
+								{:else if t.sent_back && t.decided_by}<span class="who-op"><b>{t.decided_by}</b><span class="faint">sent back</span></span>
+								{:else}<span class="faint">—</span>{/if}
 							</td>
 							<td class="check">
 								<div class="progress"><span style:width="{pct}%"></span></div>
@@ -124,6 +131,16 @@
 		flex-wrap: wrap;
 		padding: 16px 20px;
 		border-bottom: 1px solid var(--line);
+	}
+	.who-op {
+		display: grid;
+		line-height: 1.3;
+	}
+	.who-op b {
+		font-weight: 500;
+	}
+	.who-op .faint {
+		font-size: 12px;
 	}
 	.trouble {
 		display: flex;

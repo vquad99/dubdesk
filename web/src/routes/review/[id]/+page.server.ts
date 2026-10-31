@@ -14,7 +14,7 @@ import type { Actions, PageServerLoad } from './$types';
 async function jobFor(user: SessionUser, id: string) {
 	const data = await loadJob(Number(id));
 	if (!data) error(404, 'Job not found');
-	const mine = holds(data.job, user.id);
+	const mine = user.role === 'reviewer' && holds(data.job, user.id);
 	const checking = user.role === 'operator' && checks(data.job, user.id);
 	if (user.role === 'reviewer' && !mine) error(403, 'This job is not assigned to you');
 	const mode: 'review' | 'check' | 'view' = mine ? 'review' : checking ? 'check' : 'view';

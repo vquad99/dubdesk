@@ -19,7 +19,7 @@ export const load: PageServerLoad = async ({ params }) => {
 		query<{ id: number; name: string; vendor: string | null; busy: boolean }>(
 			`SELECT u.id, u.name, u.vendor,
 			        EXISTS (SELECT 1 FROM jobs j WHERE j.assigned_to = u.id AND j.status = 'assigned' AND j.locked_until > now()) AS busy
-			   FROM users u WHERE u.active AND u.role IN ('reviewer', 'admin') ORDER BY u.role DESC, u.name`
+			   FROM users u WHERE u.active AND u.role = 'reviewer' ORDER BY u.name`
 		)
 	]);
 	return { ...t, trouble, reviewers, sarvam: sarvamEnabled(), studio: studioUrl(t.task.sarvam_job_id) };
@@ -57,7 +57,7 @@ export const actions: Actions = {
 		const f = await request.formData();
 		const to = Number(f.get('reviewer'));
 		const [who] = await query<{ id: number; name: string }>(
-			`SELECT id, name FROM users WHERE id = $1 AND active AND role IN ('reviewer', 'admin')`,
+			`SELECT id, name FROM users WHERE id = $1 AND active AND role = 'reviewer'`,
 			[to]
 		);
 		if (!who) return fail(400, { error: 'Pick a reviewer.' });

@@ -17,7 +17,7 @@
 	const ALL = [
 		{ href: '/admin', label: 'Overview', icon: LayoutDashboard, roles: ['admin'] },
 		{ href: '/admin/tasks', label: 'Tasks', icon: ListVideo, roles: ['admin'] },
-		{ href: '/review', label: 'Review', icon: Headphones, roles: ['admin', 'reviewer'] },
+		{ href: '/review', label: 'Review', icon: Headphones, roles: ['reviewer'] },
 		{ href: '/operator', label: 'Progress', icon: Activity, roles: ['admin', 'operator'] },
 		{ href: '/admin/users', label: 'Users', icon: Users, roles: ['admin'] },
 		{ href: '/admin/analytics', label: 'Analytics', icon: ChartLine, roles: ['admin'] },

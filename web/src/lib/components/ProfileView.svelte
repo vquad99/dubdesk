@@ -43,14 +43,15 @@
 			.slice(0, 2)
 			.toUpperCase()
 	);
-	const isReviewer = $derived(p.user.role !== 'operator');
+	const isReviewer = $derived(p.user.role === 'reviewer');
+	const isOperator = $derived(p.user.role === 'operator');
 
 	// Sub-pages, one per kind of data; the choice lives in the address (?tab=) so it can be linked.
 	const tabs = $derived(
 		[
 			{ key: 'overview', label: 'Overview' },
 			isReviewer && p.earned ? { key: 'pay', label: 'Video & pay' } : null,
-			isReviewer ? { key: 'time', label: 'Working time' } : null,
+			isReviewer || isOperator ? { key: 'time', label: 'Working time' } : null,
 			isReviewer ? { key: 'jobs', label: `Jobs${p.jobs.length ? ` (${p.jobs.length})` : ''}` } : null,
 			{ key: 'activity', label: 'Activity' },
 			security ? { key: 'security', label: 'Security' } : null
@@ -118,10 +119,18 @@
 		<StatTile label="Average per job" value={avgJob ? workTime(avgJob) : '—'} hint="active time on sent jobs" />
 	</section>
 {/if}
+{#if isOperator}
+	<section class="tiles">
+		<StatTile label="Videos approved" value={s.checks_approved} hint="after checking the reviewer's work" />
+		<StatTile label="Sent back" value={s.checks_returned} hint="to the reviewer, with a note" />
+		<StatTile label="Video approved" value={hm(s.checked_min)} hint="total length of the videos they approved" />
+		<StatTile label="Lines fixed" value={s.lines_edited} hint="corrected while checking" />
+		<StatTile label="Working time" value={workTime(s.seconds)} hint="{workTime(s.seconds_week)} in the last 7 days" />
+	</section>
+{/if}
 {#if p.user.role === 'admin'}
 	<section class="tiles">
 		<StatTile label="Videos uploaded" value={s.videos_uploaded} />
-		<StatTile label="Reviews decided" value={s.approvals_given} hint="approved or sent back" />
 	</section>
 {/if}
 

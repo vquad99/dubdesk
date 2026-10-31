@@ -5,7 +5,9 @@ import { earnings } from '#lib/server/analytics.ts';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals }) => {
+	// Only reviewers work from the queue; admins watch from Tasks, operators check from Progress.
 	if (locals.user!.role === 'operator') redirect(303, '/operator');
+	if (locals.user!.role === 'admin') redirect(303, '/admin/tasks');
 	// No automatic jump into a held job: Back from the editor must land here.
 	const held = await currentJobId(locals.user!.id);
 	const [waiting, history, current, earned] = await Promise.all([
@@ -35,6 +37,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 export const actions: Actions = {
 	claim: async (event) => {
 		const { locals } = event;
+		if (locals.user!.role !== 'reviewer') return fail(403, { error: 'Only reviewers pick up jobs.' });
 		const held = await currentJobId(locals.user!.id);
 		const id = held ?? (await claimNextJob(locals.user!.id));
 		if (!id) return fail(404, { error: 'No jobs waiting right now.' });

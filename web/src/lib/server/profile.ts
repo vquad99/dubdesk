@@ -27,6 +27,9 @@ export async function loadProfile(userId: number) {
 			seconds_week: number;
 			videos_uploaded: number;
 			approvals_given: number;
+			checks_approved: number;
+			checks_returned: number;
+			checked_min: number;
 		}>(
 			`SELECT
 			   (SELECT COUNT(DISTINCT job_id)::int FROM job_events WHERE user_id = $1 AND action = 'submitted') AS jobs_sent,
@@ -39,7 +42,11 @@ export async function loadProfile(userId: number) {
 			   (SELECT COALESCE(SUM(seconds), 0)::int FROM work_time WHERE user_id = $1) AS seconds,
 			   (SELECT COALESCE(SUM(seconds), 0)::int FROM work_time WHERE user_id = $1 AND day > current_date - 7) AS seconds_week,
 			   (SELECT COUNT(*)::int FROM videos WHERE uploaded_by = $1) AS videos_uploaded,
-			   (SELECT COUNT(*)::int FROM job_events WHERE user_id = $1 AND action IN ('approved', 'returned')) AS approvals_given`,
+			   (SELECT COUNT(*)::int FROM job_events WHERE user_id = $1 AND action IN ('approved', 'returned')) AS approvals_given,
+			   (SELECT COUNT(*)::int FROM job_events WHERE user_id = $1 AND action = 'approved') AS checks_approved,
+			   (SELECT COUNT(*)::int FROM job_events WHERE user_id = $1 AND action = 'returned') AS checks_returned,
+			   (SELECT COALESCE(SUM(v.duration_sec), 0)::float / 60 FROM jobs j JOIN videos v ON v.id = j.video_id
+			     WHERE j.reviewed_by = $1 AND j.status IN ('approved', 'done')) AS checked_min`,
 			[userId]
 		),
 		// last 30 days: active minutes, lines edited, actions
@@ -85,6 +92,6 @@ export async function loadProfile(userId: number) {
 		)
 	]);
 
-	const earned = user.role === 'operator' ? null : await earnings(userId);
+	const earned = user.role === 'reviewer' ? await earnings(userId) : null;
 	return { user, stats, days, jobs, current: current[0] ?? null, earned };
 }

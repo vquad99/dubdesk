@@ -90,7 +90,7 @@
 					{/each}
 				</ol>
 				<div class="foot">
-					<span class="muted small">{t.reviewer ? `Reviewer: ${t.reviewer}` : 'No reviewer yet'}</span>
+					<span class="muted small">{t.reviewer ? `Reviewer: ${t.reviewer}` : 'No reviewer yet'}{(t.job_status === 'approved' || t.job_status === 'done') && t.decided_by ? ` · Approved by ${t.decided_by}` : t.checking ? ` · ${t.checking} is checking` : ''}</span>
 					<div class="dls">
 						<a class="btn btn-sm" aria-disabled={!t.lines} href="/api/operator/videos/{t.video_id}/download/hi-srt"><Download size={14} /> Hindi SRT</a>
 						<a class="btn btn-sm" aria-disabled={!t.lines} href="/api/operator/videos/{t.video_id}/download/lines-csv"><Download size={14} /> Lines CSV</a>
