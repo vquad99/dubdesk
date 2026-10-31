@@ -1,7 +1,7 @@
 import { error, json } from '@sveltejs/kit';
 import {
 	deleteSegment,
-	holds,
+	canEdit,
 	insertSegment,
 	loadJob,
 	loadSegments,
@@ -39,7 +39,7 @@ export const POST: RequestHandler = async (event) => {
 	if (!data) error(404, 'Job not found');
 	const { job } = data;
 	const me = locals.user!.id;
-	if (!holds(job, me)) error(403, 'This job is no longer yours to edit (it may have been unlocked or timed out).');
+	if (!canEdit(job, me)) error(403, 'This job is no longer yours to edit (it may have been unlocked, sent on, or timed out).');
 
 	let body: Body;
 	try {

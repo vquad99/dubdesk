@@ -1,5 +1,5 @@
 import { error, fail } from '@sveltejs/kit';
-import { approveJob, loadTask, returnJob, unlockJob } from '#lib/server/jobs.ts';
+import { assignJob, holdJob, loadTask, resumeJob, troubleOf, unlockJob } from '#lib/server/jobs.ts';
 import { query } from '#lib/server/db.ts';
 import { sarvamEnabled, studioUrl } from '#lib/server/sarvam.ts';
 import { importSubtitles, processVideo, sendToSarvam } from '#lib/server/videos.ts';
@@ -14,32 +14,57 @@ async function taskOr404(id: string) {
 
 export const load: PageServerLoad = async ({ params }) => {
 	const t = await taskOr404(params.id);
-	return { ...t, sarvam: sarvamEnabled(), studio: studioUrl(t.task.sarvam_job_id) };
+	const [trouble, reviewers] = await Promise.all([
+		troubleOf(t.task.video_id),
+		query<{ id: number; name: string; vendor: string | null; busy: boolean }>(
+			`SELECT u.id, u.name, u.vendor,
+			        EXISTS (SELECT 1 FROM jobs j WHERE j.assigned_to = u.id AND j.status = 'assigned' AND j.locked_until > now()) AS busy
+			   FROM users u WHERE u.active AND u.role IN ('reviewer', 'admin') ORDER BY u.role DESC, u.name`
+		)
+	]);
+	return { ...t, trouble, reviewers, sarvam: sarvamEnabled(), studio: studioUrl(t.task.sarvam_job_id) };
 };
 
 const note = (f: FormData) => String(f.get('note') ?? '').trim().slice(0, 2000) || null;
 
 export const actions: Actions = {
-	approve: async (event) => {
+	/** Stop: nobody can pick the video up (a reviewer holding it loses it) until the admin resumes it. */
+	hold: async (event) => {
 		const { params, request, locals } = event;
 		const { job } = await taskOr404(params.id);
-		if (!job || job.status !== 'submitted') return fail(409, { error: 'Only a job waiting for approval can be approved.' });
+		if (!job || !['queued', 'assigned', 'returned'].includes(job.status)) return fail(409, { error: 'Only a job waiting or being reviewed can be stopped.' });
 		const n = note(await request.formData());
-		await approveJob(job.id, job.video_id, locals.user!.id, n);
-		await track(event, 'job.approved', { jobId: job.id, videoId: job.video_id, details: n ?? job.title });
-		return { message: 'Approved.' };
+		if (!n) return fail(400, { error: 'Write why it is stopped, so others know.' });
+		await holdJob(job.id, job.video_id, locals.user!.id, n);
+		await track(event, 'job.held', { jobId: job.id, videoId: job.video_id, details: n });
+		return { message: 'Stopped. Nobody can pick it up until you resume it.' };
 	},
 
-	sendBack: async (event) => {
+	resume: async (event) => {
+		const { params, locals } = event;
+		const { job } = await taskOr404(params.id);
+		if (!job?.held_at) return fail(409, { error: 'This job is not stopped.' });
+		await resumeJob(job.id, job.video_id, locals.user!.id);
+		await track(event, 'job.resumed', { jobId: job.id, videoId: job.video_id, details: job.title });
+		return { message: 'Back in the queue.' };
+	},
+
+	/** Give the job straight to one reviewer. */
+	assign: async (event) => {
 		const { params, request, locals } = event;
 		const { job } = await taskOr404(params.id);
-		if (!job || job.status !== 'submitted') return fail(409, { error: 'Only a job waiting for approval can be sent back.' });
-		if (!job.assigned_to) return fail(409, { error: 'This job has no reviewer to send it back to.' });
-		const n = note(await request.formData());
-		if (!n) return fail(400, { error: 'Write a note so the reviewer knows what to fix.' });
-		await returnJob(job.id, job.video_id, locals.user!.id, n);
-		await track(event, 'job.returned', { jobId: job.id, videoId: job.video_id, details: n });
-		return { message: 'Sent back to the reviewer.' };
+		if (!job || !['queued', 'assigned', 'returned'].includes(job.status)) return fail(409, { error: 'Only a job waiting or being reviewed can be assigned.' });
+		const f = await request.formData();
+		const to = Number(f.get('reviewer'));
+		const [who] = await query<{ id: number; name: string }>(
+			`SELECT id, name FROM users WHERE id = $1 AND active AND role IN ('reviewer', 'admin')`,
+			[to]
+		);
+		if (!who) return fail(400, { error: 'Pick a reviewer.' });
+		const n = note(f);
+		await assignJob(job.id, job.video_id, who.id, locals.user!.id, n);
+		await track(event, 'job.assigned', { jobId: job.id, videoId: job.video_id, details: `to ${who.name}${n ? `: ${n}` : ''}` });
+		return { message: `Given to ${who.name}.` };
 	},
 
 	unlock: async (event) => {

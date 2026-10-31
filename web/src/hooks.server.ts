@@ -15,10 +15,10 @@ const SLOW_MS = Number(process.env.SLOW_REQUEST_MS ?? 1500);
 const PUBLIC = ['/login', '/healthz', '/robots.txt'];
 const AREAS: [prefix: string, roles: Role[]][] = [
 	['/admin', ['admin']],
-	['/review', ['reviewer', 'admin']],
+	['/review', ['reviewer', 'admin', 'operator']], // operators: only the check of a submitted job (see review/[id])
 	['/operator', ['operator', 'admin']],
 	['/api/admin', ['admin']],
-	['/api/review', ['reviewer', 'admin']],
+	['/api/review', ['reviewer', 'admin', 'operator']],
 	['/api/operator', ['operator', 'admin']]
 	// /api/media and /profile are open to every signed-in role
 ];

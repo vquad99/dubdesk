@@ -21,7 +21,7 @@ describe('format', () => {
 
 describe('status', () => {
 	it('labels every known status and falls back for unknown ones', () => {
-		expect(statusOf('submitted').label).toBe('Waiting for admin');
+		expect(statusOf('submitted').label).toBe('Waiting for check');
 		expect(statusOf('some_new_state').label).toBe('some new state');
 		expect(statusOf(null).label).toBe('—');
 	});

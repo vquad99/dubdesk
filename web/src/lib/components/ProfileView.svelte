@@ -1,5 +1,9 @@
 <script lang="ts">
+	import type { Snippet } from 'svelte';
+	import { page } from '$app/state';
 	import { ArrowRight, Clock, Mail, CalendarDays, LogIn } from '@lucide/svelte';
+	import EarningsCard from './EarningsCard.svelte';
+	import { hm } from '#lib/hm.ts';
 	import Badge from './Badge.svelte';
 	import StatTile from './StatTile.svelte';
 	import DayBars from './DayBars.svelte';
@@ -13,12 +17,14 @@
 		p,
 		activity,
 		self = false,
-		activityHref = null
+		activityHref = null,
+		security
 	}: {
 		p: NonNullable<P>;
 		activity: Parameters<typeof ActivityList>[1]['rows'];
 		self?: boolean;
 		activityHref?: string | null;
+		security?: Snippet;
 	} = $props();
 
 	const s = $derived(p.stats);
@@ -38,6 +44,29 @@
 			.toUpperCase()
 	);
 	const isReviewer = $derived(p.user.role !== 'operator');
+
+	// Sub-pages, one per kind of data; the choice lives in the address (?tab=) so it can be linked.
+	const tabs = $derived(
+		[
+			{ key: 'overview', label: 'Overview' },
+			isReviewer && p.earned ? { key: 'pay', label: 'Video & pay' } : null,
+			isReviewer ? { key: 'time', label: 'Working time' } : null,
+			isReviewer ? { key: 'jobs', label: `Jobs${p.jobs.length ? ` (${p.jobs.length})` : ''}` } : null,
+			{ key: 'activity', label: 'Activity' },
+			security ? { key: 'security', label: 'Security' } : null
+		].filter((t): t is { key: string; label: string } => !!t)
+	);
+	const tab = $derived.by(() => {
+		const want = page.url.searchParams.get('tab') ?? 'overview';
+		return tabs.some((t) => t.key === want) ? want : 'overview';
+	});
+	const tabHref = (k: string) => {
+		const u = new URLSearchParams(page.url.search);
+		if (k === 'overview') u.delete('tab');
+		else u.set('tab', k);
+		const q = u.toString();
+		return q ? `?${q}` : page.url.pathname;
+	};
 </script>
 
 <section class="card hero">
@@ -64,6 +93,21 @@
 	{/if}
 </section>
 
+<nav class="ptabs" aria-label="Profile sections">
+	{#each tabs as t (t.key)}
+		<a href={tabHref(t.key)} class:on={tab === t.key} aria-current={tab === t.key ? 'page' : undefined} data-sveltekit-noscroll data-sveltekit-replacestate>{t.label}</a>
+	{/each}
+</nav>
+
+{#if tab === 'overview'}
+{#if isReviewer && p.earned}
+	<a class="month card" href={tabHref('pay')} data-sveltekit-noscroll data-sveltekit-replacestate>
+		<span class="eyebrow">Video completed this month</span>
+		<strong>{hm(p.earned.thisMonth.approved_min)}</strong>
+		<span class="muted small">{p.earned.thisMonth.approved} approved · {hm(p.earned.pendingMin)} waiting for approval{p.earned.thisMonth.amount ? ` · ${p.earned.currency}${p.earned.thisMonth.amount.toLocaleString('en-IN')}` : ''}</span>
+		<span class="go">Video & pay <ArrowRight size={14} /></span>
+	</a>
+{/if}
 {#if isReviewer}
 	<section class="tiles">
 		<StatTile label="Jobs sent" value={s.jobs_sent} hint="sent for approval" />
@@ -81,6 +125,13 @@
 	</section>
 {/if}
 
+{/if}
+
+{#if tab === 'pay' && p.earned}
+	<EarningsCard e={p.earned} {self} />
+{/if}
+
+{#if tab === 'time'}
 <section class="card card-pad chart-card">
 	<div class="head">
 		<div>
@@ -92,7 +143,9 @@
 	<DayBars days={p.days} />
 </section>
 
-<div class="split">
+{/if}
+
+{#if tab === 'jobs'}
 	<section class="card">
 		<div class="card-head">
 			<div>
@@ -127,7 +180,9 @@
 			</div>
 		{/if}
 	</section>
+{/if}
 
+{#if tab === 'activity'}
 	<section class="card">
 		<div class="card-head">
 			<h2>Recent activity</h2>
@@ -141,9 +196,66 @@
 			{/if}
 		</div>
 	</section>
-</div>
+{/if}
+
+{#if tab === 'security' && security}
+	{@render security()}
+{/if}
 
 <style>
+	.ptabs {
+		display: flex;
+		gap: 4px;
+		margin: 0 0 18px;
+		padding: 4px;
+		border-radius: 999px;
+		background: var(--surface-2);
+		width: fit-content;
+		max-width: 100%;
+		overflow-x: auto;
+	}
+	.ptabs a {
+		padding: 7px 16px;
+		border-radius: 999px;
+		font-size: 14px;
+		color: var(--muted);
+		text-decoration: none;
+		white-space: nowrap;
+		transition:
+			background 0.2s,
+			color 0.2s;
+	}
+	.ptabs a:hover {
+		color: var(--text);
+	}
+	.ptabs a.on {
+		background: var(--panel);
+		color: var(--text);
+		box-shadow: var(--shadow-1);
+		font-weight: 500;
+	}
+	.month {
+		display: grid;
+		gap: 4px;
+		padding: 18px 22px;
+		margin-bottom: 16px;
+		text-decoration: none;
+		color: var(--text);
+		background: linear-gradient(90deg, var(--accent-soft), var(--panel) 70%);
+		border: 1px solid var(--accent-line);
+	}
+	.month strong {
+		font-size: 30px;
+		font-weight: 300;
+		letter-spacing: -0.03em;
+	}
+	.month .go {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		font-size: 13px;
+		color: var(--accent);
+	}
 	.hero {
 		display: flex;
 		align-items: center;
@@ -252,12 +364,6 @@
 		letter-spacing: -0.02em;
 		white-space: nowrap;
 	}
-	.split {
-		display: grid;
-		grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
-		gap: 16px;
-		align-items: start;
-	}
 	.title {
 		display: block;
 		font-weight: 500;
@@ -271,12 +377,5 @@
 	}
 	.feed {
 		padding: 0 24px 12px;
-		max-height: 560px;
-		overflow-y: auto;
-	}
-	@media (max-width: 1000px) {
-		.split {
-			grid-template-columns: 1fr;
-		}
 	}
 </style>

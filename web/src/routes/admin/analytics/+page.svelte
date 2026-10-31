@@ -9,6 +9,7 @@
 	import EmptyState from '#lib/components/EmptyState.svelte';
 	import { toast } from '#lib/toast.svelte.ts';
 	import { workTime } from '#lib/activity.ts';
+	import { hm } from '#lib/hm.ts';
 	import type { SubmitFunction } from '$app/forms';
 	import type { PageProps } from './$types';
 
@@ -295,7 +296,7 @@
 	<div class="kpi"><span class="k-l">Correction rate</span><span class="k-v">{pct(tot.corrected, tot.checked)}</span><span class="k-h">{tot.corrected.toLocaleString('en-IN')} lines corrected</span></div>
 	<div class="kpi"><span class="k-l">Speed</span><span class="k-v">{perHour(tot.checked, tot.active_min) ?? '—'}</span><span class="k-h">lines per active hour · {hrs(tot.active_min)} worked</span></div>
 	<div class="kpi"><span class="k-l">First-pass approval</span><span class="k-v">{pct(tot.approved, tot.approved + tot.returned)}</span><span class="k-h">{tot.approved} approved · {tot.returned} sent back</span></div>
-	<div class="kpi"><span class="k-l">Approved video</span><span class="k-v">{tot.approved_min >= 10 ? Math.round(tot.approved_min) : tot.approved_min.toFixed(1)} <small>min</small></span><span class="k-h">{tot.approved_min ? `${(tot.active_min / tot.approved_min).toFixed(1)} min of work per video min` : 'nothing approved yet'}</span></div>
+	<div class="kpi"><span class="k-l">Video completed</span><span class="k-v">{hm(tot.approved_min)}</span><span class="k-h">{tot.approved_min ? `${(tot.active_min / tot.approved_min).toFixed(1)} min of work per video min` : 'nothing approved yet'}</span></div>
 	<div class="kpi"><span class="k-l">To pay</span><span class="k-v">{noRates ? '—' : money(tot.amount)}</span><span class="k-h">{noRates ? 'set pay rates below' : `${vendors.length} ${vendors.length === 1 ? 'vendor' : 'vendors'}`}</span></div>
 </div>
 
@@ -335,11 +336,11 @@
 	{#if ratesOpen}
 		<form method="POST" action="?/rates" use:enhance={saved} class="rates fade-up">
 			<label class="field">Currency<input name="currency" value={data.rates.currency} maxlength="5" /></label>
-			<label class="field">Per approved video minute<input name="perMin" type="number" step="0.01" min="0" value={data.rates.perMin} /></label>
+			<label class="field">Per minute of approved video<input name="perMin" type="number" step="0.01" min="0" value={data.rates.perMin} /></label>
 			<label class="field">Per active hour<input name="perHour" type="number" step="0.01" min="0" value={data.rates.perHour} /></label>
 			<label class="field">Per corrected line<input name="perLine" type="number" step="0.01" min="0" value={data.rates.perLine} /></label>
 			<button class="primary" disabled={busy}>Save</button>
-			<p class="muted small span">Amount = approved video minutes × rate + active hours × rate + corrected lines × rate. Use one or mix them. A different rate for one person or vendor is set on <a href="/admin/users">Users</a> → edit.</p>
+			<p class="muted small span">Main rule: pay per minute of video the reviewer completed and the operator approved (× 60 = per video hour). Amount = approved video minutes × rate + active hours × rate + corrected lines × rate. Use one or mix them. A different rate for one person or vendor is set on <a href="/admin/users">Users</a> → edit.</p>
 		</form>
 	{/if}
 
@@ -351,7 +352,7 @@
 					<th class="num"><button class="th" onclick={() => sortBy('checked')}>Checked</button></th>
 					<th class="num"><button class="th" onclick={() => sortBy('corrected')}>Corrected</button></th>
 					<th class="num">Reviews</th>
-					<th class="num"><button class="th" onclick={() => sortBy('approved_min')}>Approved min</button></th>
+					<th class="num"><button class="th" onclick={() => sortBy('approved_min')}>Video completed</button></th>
 					<th class="num"><button class="th" onclick={() => sortBy('active_min')}>Active</button></th>
 					<th class="num"><button class="th" onclick={() => sortBy('speed')}>Lines / hour</button></th>
 					<th class="num">Rate</th>
@@ -365,7 +366,7 @@
 						<td class="num">{p.checked || '—'}</td>
 						<td class="num">{#if p.corrected}{p.corrected}<span class="sub2">{pct(p.corrected, p.checked)}</span>{:else}—{/if}</td>
 						<td class="num">{#if p.submitted || p.approved}{p.approved} ok · {p.returned} back<span class="sub2">{pct(p.approved, p.approved + p.returned)} first pass</span>{:else}—{/if}</td>
-						<td class="num">{p.approved_min ? p.approved_min.toFixed(1) : '—'}</td>
+						<td class="num">{p.approved_min ? hm(p.approved_min) : '—'}</td>
 						<td class="num">{p.active_min ? workTime(Math.round(p.active_min * 60)) : '—'}</td>
 						<td class="num">{perHour(p.checked, p.active_min) ?? '—'}</td>
 						<td class="num rate">
@@ -383,9 +384,9 @@
 			{#if vendors.length}
 				<tfoot>
 					{#each vendors as [name, v] (name)}
-						<tr class="vend"><td>{name} <span class="faint">· {v.people} {v.people === 1 ? 'person' : 'people'}</span></td><td colspan="3"></td><td class="num">{v.approved_min.toFixed(1)}</td><td class="num">{workTime(Math.round(v.active_min * 60))}</td><td colspan="2"></td><td class="num amt">{money(v.amount)}</td></tr>
+						<tr class="vend"><td>{name} <span class="faint">· {v.people} {v.people === 1 ? 'person' : 'people'}</span></td><td colspan="3"></td><td class="num">{hm(v.approved_min)}</td><td class="num">{workTime(Math.round(v.active_min * 60))}</td><td colspan="2"></td><td class="num amt">{money(v.amount)}</td></tr>
 					{/each}
-					<tr class="grand"><td>Total</td><td class="num">{tot.checked}</td><td class="num">{tot.corrected}</td><td class="num">{tot.approved} ok · {tot.returned} back</td><td class="num">{tot.approved_min.toFixed(1)}</td><td class="num">{workTime(Math.round(tot.active_min * 60))}</td><td class="num">{perHour(tot.checked, tot.active_min) ?? '—'}</td><td></td><td class="num amt">{money(tot.amount)}</td></tr>
+					<tr class="grand"><td>Total</td><td class="num">{tot.checked}</td><td class="num">{tot.corrected}</td><td class="num">{tot.approved} ok · {tot.returned} back</td><td class="num">{hm(tot.approved_min)}</td><td class="num">{workTime(Math.round(tot.active_min * 60))}</td><td class="num">{perHour(tot.checked, tot.active_min) ?? '—'}</td><td></td><td class="num amt">{money(tot.amount)}</td></tr>
 				</tfoot>
 			{/if}
 		</table>
@@ -655,10 +656,6 @@
 		font-weight: 300;
 		letter-spacing: -0.03em;
 		font-variant-numeric: tabular-nums;
-	}
-	.k-v small {
-		font-size: 14px;
-		color: var(--muted);
 	}
 	.k-h {
 		font-size: 12.5px;

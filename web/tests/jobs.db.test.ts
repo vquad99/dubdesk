@@ -128,10 +128,35 @@ describe.skipIf(!url)('job workflow (database)', async () => {
 		expect(jobs.holds(back, holder)).toBe(true);
 
 		await jobs.submitJob(jobId, videoId, holder, 'done');
-		await jobs.approveJob(jobId, adminId, null);
+		// The operator takes the check; nobody else can while it lasts; only the checker may edit.
+		expect(await jobs.startCheck(jobId, adminId)).toBe(true);
+		expect(await jobs.startCheck(jobId, holder)).toBe(false);
+		const checking = (await jobs.loadJob(jobId))!.job;
+		expect(jobs.canEdit(checking, adminId)).toBe(true);
+		expect(jobs.canEdit(checking, holder)).toBe(false);
+
+		await jobs.approveJob(jobId, videoId, adminId, null);
 		expect((await jobs.loadJob(jobId))!.job.status).toBe('approved');
+		const [v] = await query<{ status: string }>('SELECT status FROM videos WHERE id = $1', [videoId]);
+		expect(v.status).toBe('done');
 
 		const events = await query<{ action: string }>('SELECT action FROM job_events WHERE job_id = $1 ORDER BY id', [jobId]);
-		expect(events.map((e) => e.action)).toEqual(['claimed', 'submitted', 'returned', 'submitted', 'approved']);
+		expect(events.map((e) => e.action)).toEqual(['claimed', 'submitted', 'returned', 'submitted', 'check_started', 'approved']);
+	});
+
+	it('a stopped job is never handed out, and assigning lifts the stop', async () => {
+		const [{ id: vid }] = await query<{ id: number }>(
+			`INSERT INTO videos (title, original_filename, status) VALUES ('t-hold', 'h.mp4', 'ready_for_review') RETURNING id`
+		);
+		const [{ id: jid }] = await query<{ id: number }>(`INSERT INTO jobs (video_id, status, created_at) VALUES ($1, 'queued', now() - interval '100 days') RETURNING id`, [vid]);
+		await jobs.holdJob(jid, vid, adminId, 'bad audio');
+		const got = await jobs.claimNextJob(adminId);
+		expect(got).not.toBe(jid);
+		if (got) await jobs.releaseJob(got, (await jobs.loadJob(got))!.job.video_id, adminId);
+		await jobs.assignJob(jid, vid, adminId, adminId, null);
+		const j = (await jobs.loadJob(jid))!.job;
+		expect(j.status).toBe('assigned');
+		expect(j.held_at).toBeNull();
+		await query('DELETE FROM videos WHERE id = $1', [vid]);
 	});
 });

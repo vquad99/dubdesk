@@ -8,7 +8,7 @@ const STATUS: Record<string, { label: string; tone: Tone }> = {
 	dubbing: { label: 'Dubbing', tone: 'info' },
 	ready_for_review: { label: 'Ready for review', tone: 'warn' },
 	in_review: { label: 'In review', tone: 'info' },
-	submitted: { label: 'Waiting for admin', tone: 'accent' },
+	submitted: { label: 'Waiting for check', tone: 'accent' },
 	regenerating: { label: 'Regenerating', tone: 'info' },
 	done: { label: 'Done', tone: 'ok' },
 	failed: { label: 'Failed', tone: 'danger' },
@@ -16,7 +16,8 @@ const STATUS: Record<string, { label: string; tone: Tone }> = {
 	queued: { label: 'In queue', tone: 'warn' },
 	assigned: { label: 'With reviewer', tone: 'info' },
 	returned: { label: 'Sent back', tone: 'danger' },
-	approved: { label: 'Approved', tone: 'ok' }
+	approved: { label: 'Approved', tone: 'ok' },
+	on_hold: { label: 'Stopped', tone: 'danger' }
 };
 
 export function statusOf(status: string | null | undefined): { label: string; tone: Tone } {

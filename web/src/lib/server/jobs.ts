@@ -56,14 +56,16 @@ export async function currentJobId(userId: number): Promise<number | null> {
 export async function waitingCount(): Promise<number> {
 	const [{ n }] = await query<{ n: number }>(
 		`SELECT COUNT(*)::int AS n FROM jobs
-		  WHERE status = 'queued' OR (status = 'assigned' AND locked_until <= now())`
+		  WHERE held_at IS NULL AND (status = 'queued' OR (status = 'assigned' AND locked_until <= now()))`
 	);
 	return n;
 }
 
 /**
  * Give the oldest waiting job to this reviewer. A job whose lock ran out counts as waiting.
- * SKIP LOCKED keeps two reviewers pressing at the same moment from getting the same job.
+ * Stopped (held) jobs are never handed out, and a job this reviewer already gave back comes to
+ * them only when nothing else is waiting. SKIP LOCKED keeps two reviewers pressing at the same
+ * moment from getting the same job.
  */
 export async function claimNextJob(userId: number): Promise<number | null> {
 	return tx(async (q) => {
@@ -71,9 +73,11 @@ export async function claimNextJob(userId: number): Promise<number | null> {
 			`UPDATE jobs SET status = 'assigned', assigned_to = $1, assigned_at = now(),
 			        locked_until = now() + make_interval(hours => $2)
 			  WHERE id = (
-			        SELECT id FROM jobs
-			         WHERE status = 'queued' OR (status = 'assigned' AND locked_until <= now())
-			         ORDER BY created_at
+			        SELECT id FROM jobs j
+			         WHERE j.held_at IS NULL AND (j.status = 'queued' OR (j.status = 'assigned' AND j.locked_until <= now()))
+			         ORDER BY EXISTS (SELECT 1 FROM job_events e JOIN jobs j2 ON j2.id = e.job_id
+			                           WHERE j2.video_id = j.video_id AND e.user_id = $1 AND e.action IN ('released', 'expired')),
+			                  j.created_at
 			         LIMIT 1 FOR UPDATE SKIP LOCKED)
 			  RETURNING id, video_id`,
 			[userId, LOCK_HOURS]
@@ -94,6 +98,12 @@ export type JobRow = {
 	assigned_at: Date | null;
 	locked_until: Date | null;
 	admin_note: string | null;
+	held_at: Date | null;
+	hold_reason: string | null;
+	qa_by: number | null;
+	qa_locked_until: Date | null;
+	reviewer_name: string | null;
+	qa_name: string | null;
 	title: string;
 	duration_sec: string | null;
 	source_key: string | null;
@@ -101,13 +111,17 @@ export type JobRow = {
 	peaks_key: string | null;
 	audio_key: string | null;
 	dubbed_audio_key: string | null;
+	sarvam_job_id: string | null;
 };
 
 export async function loadJob(jobId: number) {
 	const [job] = await query<JobRow>(
-		`SELECT j.id, j.video_id, j.round, j.status, j.assigned_to, j.assigned_at, j.locked_until, j.admin_note,
-		        v.title, v.duration_sec, v.source_key, v.dubbed_key, v.peaks_key, v.audio_key, v.dubbed_audio_key
-		   FROM jobs j JOIN videos v ON v.id = j.video_id WHERE j.id = $1`,
+		`SELECT j.id, j.video_id, j.round, j.status, j.assigned_to, j.assigned_at, j.locked_until, j.admin_note, j.held_at, j.hold_reason,
+		        j.qa_by, j.qa_locked_until, ru.name AS reviewer_name, qu.name AS qa_name,
+		        v.title, v.duration_sec, v.source_key, v.dubbed_key, v.peaks_key, v.audio_key, v.dubbed_audio_key, v.sarvam_job_id
+		   FROM jobs j JOIN videos v ON v.id = j.video_id
+		   LEFT JOIN users ru ON ru.id = j.assigned_to LEFT JOIN users qu ON qu.id = j.qa_by
+		  WHERE j.id = $1`,
 		[jobId]
 	);
 	if (!job) return null;
@@ -134,10 +148,12 @@ export async function loadDeletedSegments(videoId: number) {
 
 /** Working on a job keeps it: every save pushes the lock end out again. */
 export async function touchLock(jobId: number) {
-	await query(`UPDATE jobs SET locked_until = now() + make_interval(hours => $2) WHERE id = $1 AND status = 'assigned'`, [
-		jobId,
-		LOCK_HOURS
-	]);
+	await query(
+		`UPDATE jobs SET locked_until = CASE WHEN status = 'assigned' THEN now() + make_interval(hours => $2) ELSE locked_until END,
+		        qa_locked_until = CASE WHEN status = 'submitted' AND qa_by IS NOT NULL THEN now() + make_interval(hours => $2) ELSE qa_locked_until END
+		  WHERE id = $1`,
+		[jobId, LOCK_HOURS]
+	);
 }
 
 export const MIN_LINE_SEC = 0.1;
@@ -152,6 +168,80 @@ export function badTiming(start: number, end: number, duration: number | null): 
 }
 
 /** Is this job held by this reviewer right now (lock not run out)? */
+/** True when this operator (or admin) is the one checking this submitted job right now. */
+export function checks(job: JobRow, userId: number): boolean {
+	return (
+		job.status === 'submitted' &&
+		job.qa_by === userId &&
+		!!job.qa_locked_until &&
+		new Date(job.qa_locked_until).getTime() > Date.now()
+	);
+}
+
+/** May write lines: the reviewer holding the job, or the operator checking it. */
+export function canEdit(job: JobRow, userId: number): boolean {
+	return holds(job, userId) || checks(job, userId);
+}
+
+/**
+ * The operator takes a submitted job to check. Nobody else can check it while their lock lasts;
+ * an expired lock frees it for another operator. Returns false when someone else is checking.
+ */
+export async function startCheck(jobId: number, userId: number): Promise<boolean> {
+	return tx(async (q) => {
+		const rows = await q<{ id: number }>(
+			`UPDATE jobs SET qa_by = $2, qa_locked_until = now() + make_interval(hours => $3)
+			  WHERE id = $1 AND status = 'submitted'
+			    AND (qa_by IS NULL OR qa_by = $2 OR qa_locked_until <= now())
+			  RETURNING id`,
+			[jobId, userId, LOCK_HOURS]
+		);
+		if (!rows[0]) return false;
+		const [prev] = await q<{ n: number }>(
+			`SELECT COUNT(*)::int AS n FROM job_events WHERE job_id = $1 AND user_id = $2 AND action = 'check_started'
+			   AND created_at > now() - make_interval(hours => $3)`,
+			[jobId, userId, LOCK_HOURS]
+		);
+		if (!prev.n) await logEvent(q, jobId, userId, 'check_started');
+		return true;
+	});
+}
+
+/** The operator stops checking without a decision; the job waits for the next check. */
+export async function releaseCheck(jobId: number, userId: number) {
+	await tx(async (q) => {
+		await q(`UPDATE jobs SET qa_by = NULL, qa_locked_until = NULL WHERE id = $1 AND qa_by = $2`, [jobId, userId]);
+		await logEvent(q, jobId, userId, 'check_released');
+	});
+}
+
+/** Submitted jobs for the operator's check queue, oldest first, with who is checking each. */
+export async function checkQueue() {
+	return query<{
+		job_id: number;
+		video_id: number;
+		title: string;
+		duration_sec: string | null;
+		round: number;
+		reviewer: string | null;
+		submitted_at: Date | null;
+		qa_by: number | null;
+		qa_name: string | null;
+		qa_active: boolean;
+		lines: number;
+		edited: number;
+	}>(
+		`SELECT j.id AS job_id, j.video_id, v.title, v.duration_sec, j.round, ru.name AS reviewer, j.submitted_at,
+		        j.qa_by, qu.name AS qa_name, (j.qa_locked_until > now()) AS qa_active,
+		        (SELECT COUNT(*)::int FROM segments s WHERE s.video_id = v.id AND s.deleted_at IS NULL) AS lines,
+		        (SELECT COUNT(*)::int FROM segments s WHERE s.video_id = v.id AND s.deleted_at IS NULL
+		           AND (s.hi_text <> s.hi_text_original OR s.origin <> 'source')) AS edited
+		   FROM jobs j JOIN videos v ON v.id = j.video_id
+		   LEFT JOIN users ru ON ru.id = j.assigned_to LEFT JOIN users qu ON qu.id = j.qa_by
+		  WHERE j.status = 'submitted' ORDER BY j.submitted_at NULLS LAST, j.id`
+	);
+}
+
 export function holds(job: JobRow, userId: number): boolean {
 	return (
 		job.status === 'assigned' &&
@@ -353,14 +443,14 @@ export async function replaceInJob(jobId: number, videoId: number, userId: numbe
 	return changes.length ? saveSegments(jobId, videoId, userId, changes) : 0;
 }
 
-export async function releaseJob(jobId: number, videoId: number, userId: number) {
+export async function releaseJob(jobId: number, videoId: number, userId: number, reason: string | null = null) {
 	await tx(async (q) => {
 		await q(
 			`UPDATE jobs SET status = 'queued', assigned_to = NULL, assigned_at = NULL, locked_until = NULL WHERE id = $1`,
 			[jobId]
 		);
 		await q(`UPDATE videos SET status = 'ready_for_review', updated_at = now() WHERE id = $1`, [videoId]);
-		await logEvent(q, jobId, userId, 'released');
+		await logEvent(q, jobId, userId, 'released', reason);
 	});
 }
 
@@ -376,7 +466,8 @@ export async function submitJob(jobId: number, videoId: number, userId: number, 
 export async function approveJob(jobId: number, videoId: number, adminId: number, note: string | null) {
 	await tx(async (q) => {
 		await q(
-			`UPDATE jobs SET status = 'approved', reviewed_by = $2, reviewed_at = now(), admin_note = $3 WHERE id = $1`,
+			`UPDATE jobs SET status = 'approved', reviewed_by = $2, reviewed_at = now(), admin_note = $3,
+			        qa_by = NULL, qa_locked_until = NULL WHERE id = $1`,
 			[jobId, adminId, note]
 		);
 		// The video is finished once its review is approved.
@@ -390,13 +481,69 @@ export async function returnJob(jobId: number, videoId: number, adminId: number,
 	await tx(async (q) => {
 		await q(
 			`UPDATE jobs SET status = 'assigned', admin_note = $2, reviewed_by = $3, reviewed_at = now(),
-			        assigned_at = now(), locked_until = now() + make_interval(hours => $4)
+			        assigned_at = now(), locked_until = now() + make_interval(hours => $4), qa_by = NULL, qa_locked_until = NULL
 			  WHERE id = $1`,
 			[jobId, note, adminId, LOCK_HOURS]
 		);
 		await q(`UPDATE videos SET status = 'in_review', updated_at = now() WHERE id = $1`, [videoId]);
 		await logEvent(q, jobId, adminId, 'returned', note);
 	});
+}
+
+/** Admin stops a job: nobody can pick it up until it is resumed. A reviewer holding it loses it. */
+export async function holdJob(jobId: number, videoId: number, adminId: number, reason: string) {
+	await tx(async (q) => {
+		await q(
+			`UPDATE jobs SET held_at = now(), held_by = $2, hold_reason = $3,
+			        status = 'queued', assigned_to = NULL, assigned_at = NULL, locked_until = NULL
+			  WHERE id = $1 AND status IN ('queued', 'assigned', 'returned')`,
+			[jobId, adminId, reason]
+		);
+		await q(`UPDATE videos SET status = 'ready_for_review', updated_at = now() WHERE id = $1`, [videoId]);
+		await logEvent(q, jobId, adminId, 'held', reason);
+	});
+}
+
+/** Admin lets a stopped job be picked up again. */
+export async function resumeJob(jobId: number, videoId: number, adminId: number) {
+	await tx(async (q) => {
+		await q(`UPDATE jobs SET held_at = NULL, held_by = NULL, hold_reason = NULL WHERE id = $1`, [jobId]);
+		await q(`UPDATE videos SET updated_at = now() WHERE id = $1`, [videoId]);
+		await logEvent(q, jobId, adminId, 'resumed');
+	});
+}
+
+/** Admin gives the job straight to one reviewer (also takes it off whoever had it, and lifts a stop). */
+export async function assignJob(jobId: number, videoId: number, reviewerId: number, adminId: number, note: string | null) {
+	await tx(async (q) => {
+		await q(
+			`UPDATE jobs SET status = 'assigned', assigned_to = $2, assigned_at = now(),
+			        locked_until = now() + make_interval(hours => $3),
+			        held_at = NULL, held_by = NULL, hold_reason = NULL,
+			        admin_note = COALESCE($4, admin_note)
+			  WHERE id = $1 AND status IN ('queued', 'assigned', 'returned')`,
+			[jobId, reviewerId, LOCK_HOURS, note]
+		);
+		await q(`UPDATE videos SET status = 'in_review', updated_at = now() WHERE id = $1`, [videoId]);
+		await logEvent(q, jobId, adminId, 'assigned', note);
+	});
+}
+
+/** Who gave this video back or let it time out, and how often the admin sent it back. */
+export async function troubleOf(videoId: number) {
+	const rows = await query<{ action: string; note: string | null; created_at: Date; user_id: number | null; user_name: string | null }>(
+		`SELECT e.action, e.note, e.created_at, e.user_id, u.name AS user_name
+		   FROM job_events e JOIN jobs j ON j.id = e.job_id LEFT JOIN users u ON u.id = e.user_id
+		  WHERE j.video_id = $1 AND e.action IN ('released', 'expired', 'returned') ORDER BY e.created_at`,
+		[videoId]
+	);
+	const gaveBack = rows.filter((r) => r.action !== 'returned');
+	return {
+		givenBack: gaveBack.length,
+		people: new Set(gaveBack.map((r) => r.user_id)).size,
+		sentBack: rows.filter((r) => r.action === 'returned').length,
+		events: rows
+	};
 }
 
 /** Admin takes a job off a reviewer and puts it back in the queue. */
@@ -421,6 +568,10 @@ export type TaskRow = {
 	round: number | null;
 	reviewer: string | null;
 	locked_until: Date | null;
+	held_at: Date | null;
+	hold_reason: string | null;
+	gave_back: number; // different people who gave it back or let it time out
+	sent_back: number; // times the admin sent it back
 	lines: number;
 	edited: number;
 	flagged: number;
@@ -430,7 +581,11 @@ export type TaskRow = {
 
 const TASK_SELECT = `
 	SELECT v.id AS video_id, j.id AS job_id, v.title, v.duration_sec, v.status AS video_status,
-	       j.status AS job_status, j.round, u.name AS reviewer, j.locked_until,
+	       j.status AS job_status, j.round, u.name AS reviewer, j.locked_until, j.held_at, j.hold_reason,
+	       (SELECT COUNT(DISTINCT e.user_id)::int FROM job_events e JOIN jobs jj ON jj.id = e.job_id
+	         WHERE jj.video_id = v.id AND e.action IN ('released', 'expired')) AS gave_back,
+	       (SELECT COUNT(*)::int FROM job_events e JOIN jobs jj ON jj.id = e.job_id
+	         WHERE jj.video_id = v.id AND e.action = 'returned') AS sent_back,
 	       COUNT(s.id)::int AS lines,
 	       COUNT(s.id) FILTER (WHERE s.hi_text <> s.hi_text_original OR s.origin <> 'source'
 	                            OR s.start_sec <> s.start_sec_original OR s.end_sec <> s.end_sec_original)::int AS edited,
@@ -445,9 +600,14 @@ const TASK_SELECT = `
 export async function listTasks(opts: { status?: string; q?: string; limit?: number; offset?: number } = {}) {
 	const where: string[] = [];
 	const params: unknown[] = [];
-	if (opts.status) {
+	if (opts.status === 'on_hold') where.push('j.held_at IS NOT NULL');
+	else if (opts.status === 'trouble')
+		where.push(`(SELECT COUNT(DISTINCT e.user_id) FROM job_events e JOIN jobs jj ON jj.id = e.job_id
+		              WHERE jj.video_id = v.id AND e.action IN ('released', 'expired')) >= 2`);
+	else if (opts.status) {
 		params.push(opts.status);
 		where.push(`(j.status = $${params.length} OR v.status = $${params.length})`);
+		if (opts.status === 'queued') where.push('j.held_at IS NULL');
 	}
 	if (opts.q) {
 		params.push(`%${opts.q}%`);
@@ -465,7 +625,7 @@ export async function listTasks(opts: { status?: string; q?: string; limit?: num
 			   LEFT JOIN users u ON u.id = j.assigned_to
 			   ${cond} ORDER BY v.updated_at DESC, v.id DESC LIMIT ${limit} OFFSET ${offset})
 			 ${TASK_SELECT} WHERE v.id IN (SELECT id FROM page)
-			 GROUP BY v.id, j.id, j.status, j.round, u.name, j.locked_until
+			 GROUP BY v.id, j.id, j.status, j.round, u.name, j.locked_until, j.held_at, j.hold_reason
 			 ORDER BY v.updated_at DESC, v.id DESC`,
 			params
 		),
@@ -481,7 +641,7 @@ export async function listTasks(opts: { status?: string; q?: string; limit?: num
 
 export async function loadTask(videoId: number) {
 	const [task] = await query<TaskRow & { error: string | null; source_key: string | null; dubbed_key: string | null; peaks_key: string | null; sarvam_job_id: string | null; sarvam_status: string | null; sarvam_progress: number | null; original_filename: string; size_bytes: string | null }>(
-		`${TASK_SELECT.replace('v.updated_at', 'v.updated_at, v.error, v.source_key, v.dubbed_key, v.peaks_key, v.sarvam_job_id, v.sarvam_status, v.sarvam_progress, v.original_filename, v.size_bytes')} WHERE v.id = $1 GROUP BY v.id, j.id, j.status, j.round, u.name, j.locked_until`,
+		`${TASK_SELECT.replace('v.updated_at', 'v.updated_at, v.error, v.source_key, v.dubbed_key, v.peaks_key, v.sarvam_job_id, v.sarvam_status, v.sarvam_progress, v.original_filename, v.size_bytes')} WHERE v.id = $1 GROUP BY v.id, j.id, j.status, j.round, u.name, j.locked_until, j.held_at, j.hold_reason`,
 		[videoId]
 	);
 	if (!task) return null;

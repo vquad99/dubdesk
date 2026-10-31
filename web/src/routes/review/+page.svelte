@@ -8,6 +8,7 @@
 	import EmptyState from '#lib/components/EmptyState.svelte';
 	import { toast } from '#lib/toast.svelte.ts';
 	import { ago, plural } from '#lib/format.ts';
+	import { hm } from '#lib/hm.ts';
 	import type { PageProps } from './$types';
 
 	let { data, form }: PageProps = $props();
@@ -28,6 +29,14 @@
 		<p class="sub">Pick up the next video, check every line, send it back.</p>
 	</div>
 </div>
+
+<a class="card earned" href="/profile?tab=pay">
+	<span class="e-item"><span class="e-l">Video completed this month</span><strong>{hm(data.earned.thisMonth.approved_min)}</strong></span>
+	<span class="e-item"><span class="e-l">Waiting for approval</span><strong>{hm(data.earned.pendingMin)}</strong></span>
+	<span class="e-item"><span class="e-l">All time</span><strong>{hm(data.earned.allTime.approved_min)}</strong></span>
+	{#if data.earned.thisMonth.amount}<span class="e-item"><span class="e-l">Earned this month</span><strong>{data.earned.currency}{data.earned.thisMonth.amount.toLocaleString('en-IN')}</strong></span>{/if}
+	<span class="e-go">Details <ArrowRight size={14} /></span>
+</a>
 
 {#if data.current}
 	{@const c = data.current}
@@ -99,6 +108,43 @@
 </section>
 
 <style>
+	.earned {
+		display: flex;
+		align-items: center;
+		gap: 28px;
+		flex-wrap: wrap;
+		padding: 16px 22px;
+		margin-bottom: 16px;
+		color: var(--text);
+		text-decoration: none;
+		background: linear-gradient(90deg, var(--accent-soft), var(--panel) 75%);
+		border: 1px solid var(--accent-line);
+	}
+	.e-item {
+		display: grid;
+		gap: 2px;
+	}
+	.e-l {
+		font-size: 11.5px;
+		font-weight: 500;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: var(--muted);
+	}
+	.e-item strong {
+		font-size: 22px;
+		font-weight: 400;
+		letter-spacing: -0.02em;
+		font-variant-numeric: tabular-nums;
+	}
+	.e-go {
+		margin-left: auto;
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		font-size: 13px;
+		color: var(--accent);
+	}
 	.hero {
 		display: flex;
 		align-items: center;

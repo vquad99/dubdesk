@@ -13,5 +13,6 @@
 	</div>
 </div>
 
-<ProfileView p={data.p} activity={data.activity} self />
-<SecurityPanel security={data.security} {form} />
+<ProfileView p={data.p} activity={data.activity} self>
+	{#snippet security()}<SecurityPanel security={data.security} {form} />{/snippet}
+</ProfileView>

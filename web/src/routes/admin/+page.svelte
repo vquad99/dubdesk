@@ -36,7 +36,7 @@
 	<StatTile label="Videos" value={data.counts.videos} hint="{data.counts.minutes} min of video" href="/admin/tasks" />
 	<StatTile label="In queue" value={data.counts.waiting} hint="waiting for a reviewer" href="/admin/tasks?status=queued" />
 	<StatTile label="In review" value={data.counts.in_review} hint="with a reviewer now" href="/admin/tasks?status=assigned" />
-	<StatTile label="Needs you" value={data.counts.submitted} hint="waiting for approval" href="/admin/tasks?status=submitted" />
+	<StatTile label="Waiting for check" value={data.counts.submitted} hint="the operators approve or send back" href="/admin/tasks?status=submitted" />
 	<StatTile label="Approved" value={data.counts.approved} hint="ready to regenerate" href="/admin/tasks?status=approved" />
 </section>
 

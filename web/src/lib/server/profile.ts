@@ -1,4 +1,5 @@
 import { query } from './db.ts';
+import { earnings } from './analytics.ts';
 
 /** Everything shown on a person's profile: who they are, their numbers, their days, their jobs. */
 export async function loadProfile(userId: number) {
@@ -84,5 +85,6 @@ export async function loadProfile(userId: number) {
 		)
 	]);
 
-	return { user, stats, days, jobs, current: current[0] ?? null };
+	const earned = user.role === 'operator' ? null : await earnings(userId);
+	return { user, stats, days, jobs, current: current[0] ?? null, earned };
 }

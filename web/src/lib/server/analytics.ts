@@ -165,7 +165,7 @@ export type PersonRow = Metrics & {
 };
 
 /** Totals per person for the period, with what they are owed at their rates. */
-export async function people(r: Range, rates: PayRates): Promise<PersonRow[]> {
+export async function people(r: Range, rates: PayRates, onlyUser?: number): Promise<PersonRow[]> {
 	const rows = await query<Omit<PersonRow, 'amount' | 'rate_min' | 'rate_hour' | 'rate_line' | 'custom_rate'> & {
 		pay_per_min: string | null;
 		pay_per_hour: string | null;
@@ -177,9 +177,9 @@ export async function people(r: Range, rates: PayRates): Promise<PersonRow[]> {
 		        COALESCE(m.approved, 0) AS approved, COALESCE(m.returned, 0) AS returned,
 		        COALESCE(m.approved_min, 0) AS approved_min, COALESCE(m.active_min, 0) AS active_min
 		   FROM users u LEFT JOIN m ON m.user_id = u.id
-		  WHERE u.role = 'reviewer' OR m.user_id IS NOT NULL
+		  WHERE ${onlyUser ? 'u.id = $3' : "(u.role = 'reviewer' OR m.user_id IS NOT NULL)"}
 		  ORDER BY COALESCE(m.approved_min, 0) DESC, COALESCE(m.checked, 0) DESC, u.name`,
-		[istDay(r.from), istDay(addDays(r.to, 1))]
+		onlyUser ? [istDay(r.from), istDay(addDays(r.to, 1)), onlyUser] : [istDay(r.from), istDay(addDays(r.to, 1))]
 	);
 	return rows.map(({ pay_per_min, pay_per_hour, pay_per_line, ...p }) => {
 		const rate_min = pay_per_min != null ? Number(pay_per_min) : rates.perMin;
@@ -188,6 +188,59 @@ export async function people(r: Range, rates: PayRates): Promise<PersonRow[]> {
 		const amount = Math.round((p.approved_min * rate_min + (p.active_min / 60) * rate_hour + p.corrected * rate_line) * 100) / 100;
 		return { ...p, rate_min, rate_hour, rate_line, custom_rate: pay_per_min != null || pay_per_hour != null || pay_per_line != null, amount };
 	});
+}
+
+// ---------------- one person's completed video and pay ----------------
+
+export type Earn = { approved_min: number; approved: number; active_min: number; corrected: number; amount: number };
+export type Earnings = {
+	currency: string;
+	rates: { perMin: number; perHour: number; perLine: number };
+	thisMonth: Earn;
+	lastMonth: Earn;
+	allTime: Earn;
+	pendingMin: number; // sent for approval, not yet approved
+	pendingJobs: number;
+	months: (Earn & { month: string })[]; // last 6 months, oldest first
+};
+
+/** Video completed (approved) and pay for one person: this month, last month, all time, last 6 months. */
+export async function earnings(userId: number): Promise<Earnings> {
+	const rates = await loadPayRates();
+	const today = istToday();
+	const m0 = today.slice(0, 8) + '01';
+	const lastEnd = addDays(m0, -1);
+	const six = new Date(`${m0}T00:00:00Z`);
+	six.setUTCMonth(six.getUTCMonth() - 5);
+	const sixFrom = six.toISOString().slice(0, 10);
+	const pick = (rows: PersonRow[]): Earn => {
+		const p = rows[0];
+		return p
+			? { approved_min: p.approved_min, approved: p.approved, active_min: p.active_min, corrected: p.corrected, amount: p.amount }
+			: { approved_min: 0, approved: 0, active_min: 0, corrected: 0, amount: 0 };
+	};
+	const [tm, lm, all, [pending], monthly] = await Promise.all([
+		people({ from: m0, to: today, preset: 'month' }, rates, userId),
+		people({ from: lastEnd.slice(0, 8) + '01', to: lastEnd, preset: 'lastmonth' }, rates, userId),
+		people({ from: '2020-01-01', to: today, preset: 'all' }, rates, userId),
+		query<{ minutes: number; jobs: number }>(
+			`SELECT COALESCE(SUM(v.duration_sec), 0)::float / 60 AS minutes, COUNT(*)::int AS jobs
+			   FROM jobs j JOIN videos v ON v.id = j.video_id WHERE j.assigned_to = $1 AND j.status = 'submitted'`,
+			[userId]
+		),
+		trend('month', { from: sixFrom, to: today, preset: 'custom' }, userId)
+	]);
+	const me = all[0];
+	const r = { perMin: me?.rate_min ?? rates.perMin, perHour: me?.rate_hour ?? rates.perHour, perLine: me?.rate_line ?? rates.perLine };
+	const pay = (m: Metrics) => Math.round((m.approved_min * r.perMin + (m.active_min / 60) * r.perHour + m.corrected * r.perLine) * 100) / 100;
+	const byMonth = new Map(monthly.map((x) => [x.bucket.slice(0, 7), x]));
+	const months = buckets('month', { from: sixFrom, to: today, preset: 'custom' }).map((b) => {
+		const x = byMonth.get(b.slice(0, 7));
+		return x
+			? { month: b.slice(0, 7), approved_min: x.approved_min, approved: x.approved, active_min: x.active_min, corrected: x.corrected, amount: pay(x) }
+			: { month: b.slice(0, 7), approved_min: 0, approved: 0, active_min: 0, corrected: 0, amount: 0 };
+	});
+	return { currency: rates.currency, rates: r, thisMonth: pick(tm), lastMonth: pick(lm), allTime: pick(all), pendingMin: pending.minutes, pendingJobs: pending.jobs, months };
 }
 
 // ---------------- live ----------------

@@ -5,6 +5,7 @@
 		ArrowLeft,
 		Check,
 		CircleCheck,
+		ExternalLink,
 		Cloud,
 		CloudOff,
 		Keyboard,
@@ -85,8 +86,16 @@
 	// svelte-ignore state_referenced_locally
 	const job = data.job;
 	const media = (kind: string) => `/api/media/${job.video_id}/${kind}`;
-	// An admin looking at someone's job goes back to that task; a reviewer to their queue.
-	const backHref = editable ? '/review' : `/admin/tasks/${job.video_id}`;
+	// svelte-ignore state_referenced_locally
+	const mode = data.mode;
+	// A reviewer goes back to their queue, an operator to the check list, an admin to the task.
+	// svelte-ignore state_referenced_locally
+	const backHref = mode === 'review' ? '/review' : data.user?.role === 'operator' ? '/operator' : `/admin/tasks/${job.video_id}`;
+	let approveOpen = $state(false);
+	let backOpen = $state(false);
+	let approveForm = $state<HTMLFormElement>();
+	let backForm = $state<HTMLFormElement>();
+	let stopForm = $state<HTMLFormElement>();
 
 	const isEdited = (l: Line) =>
 		l.hi.trim() !== l.original || l.origin !== 'source' || l.start !== l.origStart || l.end !== l.origEnd;
@@ -262,7 +271,7 @@
 		if (!l.reviewed) toggleChecked(l);
 		const next = nextUnchecked(l);
 		if (next) goTo(next, focusText);
-		else toast('Every line is checked. Send it to the admin when ready.');
+		else toast('Every line is checked. Send it on when ready.');
 	}
 	function jumpToUnchecked() {
 		const next = nextUnchecked(current ?? undefined);
@@ -551,18 +560,34 @@
 			</span>
 		{/if}
 		<button class="ghost icon-only" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts" onclick={() => (keysOpen = true)}><Keyboard size={17} /></button>
-		{#if editable}
+		{#if mode === 'check'}
+			{#if data.studio}<a class="btn btn-ghost" href={data.studio} target="_blank" rel="noopener noreferrer" title="Fix voice or timing in Sarvam Studio"><ExternalLink size={15} /> Sarvam Studio</a>{/if}
+			<button class="ghost" onclick={() => send(stopForm)}>Stop checking</button>
+			<button class="danger" onclick={() => (backOpen = true)}><Undo2 size={16} /> Send back</button>
+			<button class="primary" onclick={() => (approveOpen = true)}><CircleCheck size={15} /> Approve</button>
+		{:else if editable}
 			<button class="ghost" onclick={() => (releaseOpen = true)}><Undo2 size={16} /> Give back</button>
-			<button class="primary" onclick={() => (submitOpen = true)}><Send size={15} /> Send to admin</button>
+			<button class="primary" onclick={() => (submitOpen = true)}><Send size={15} /> Send for check</button>
 		{:else}
 			<Badge label="Read only" tone="neutral" />
 		{/if}
 	</header>
 
-	{#if job.admin_note}
+	{#if mode === 'check'}
+		<div class="banner check">
+			<CircleCheck size={17} />
+			<div><strong>You are checking {job.reviewer_name ?? 'the reviewer'}'s work.</strong> Fix anything they missed (here, or voice and timing in Sarvam Studio), then approve it — or send it back if there are many mistakes.</div>
+		</div>
+	{:else if data.busyBy}
 		<div class="banner">
 			<TriangleAlert size={17} />
-			<div><strong>Sent back by admin.</strong> {job.admin_note}</div>
+			<div><strong>{data.busyBy} is checking this video.</strong> You can look, but not change it.</div>
+		</div>
+	{/if}
+	{#if job.admin_note && mode === 'review'}
+		<div class="banner">
+			<TriangleAlert size={17} />
+			<div><strong>Sent back to you to fix.</strong> {job.admin_note}</div>
 		</div>
 	{/if}
 
@@ -637,7 +662,7 @@
 											<button class="flag" class:on={l.flag === k} onclick={() => setFlag(l, k)}>{label}</button>
 										{/each}
 									</div>
-									<input class="comment" placeholder="Comment for the admin" bind:value={l.comment} oninput={() => mark(l, { comment: l.comment })} />
+									<input class="comment" placeholder={mode === 'check' ? 'Comment for the reviewer' : 'Comment for the checker'} bind:value={l.comment} oninput={() => mark(l, { comment: l.comment })} />
 									{#if l.original && changedText}
 										<div class="orig">
 											<span class="faint">Original</span>
@@ -756,7 +781,7 @@
 </Modal>
 
 <Modal bind:open={delOpen} title="Remove line {current ? lines.indexOf(current) + 1 : ''}?" width={420}>
-	<p class="muted">The line disappears from the dub. The admin still sees that you removed it.</p>
+	<p class="muted">The line disappears from the dub. The checker still sees that it was removed.</p>
 	{#if current?.hi}<p class="quote" lang="hi">{current.hi}</p>{/if}
 	{#snippet footer()}
 		<button class="ghost" onclick={() => (delOpen = false)}>Cancel</button>
@@ -764,7 +789,7 @@
 	{/snippet}
 </Modal>
 
-<Modal bind:open={submitOpen} title="Send to admin?">
+<Modal bind:open={submitOpen} title="Send for check?">
 	<div class="summary">
 		<div><strong>{counts.checked}/{lines.length}</strong><span>checked</span></div>
 		<div><strong>{counts.edited}</strong><span>edited</span></div>
@@ -774,7 +799,7 @@
 		<p class="warn"><TriangleAlert size={15} /> {plural(lines.length - counts.checked, 'line')} not marked as checked yet.</p>
 	{/if}
 	<form bind:this={submitForm} method="POST" action="?/submit">
-		<label class="field">Note for the admin (optional)<textarea name="note" rows="3" placeholder="Anything they should know"></textarea></label>
+		<label class="field">Note for the checker (optional)<textarea name="note" rows="3" placeholder="Anything they should know"></textarea></label>
 	</form>
 	{#snippet footer()}
 		<button class="ghost" onclick={() => (submitOpen = false)}>Keep working</button>
@@ -783,13 +808,56 @@
 </Modal>
 
 <Modal bind:open={releaseOpen} title="Give this job back?">
-	<p class="muted">Your edits stay saved. The job goes back to the queue for anyone to pick up.</p>
-	<form bind:this={releaseForm} method="POST" action="?/release"></form>
+	<p class="muted">Your edits stay saved. The job goes back to the queue for someone else to pick up.</p>
+	<form bind:this={releaseForm} method="POST" action="?/release" class="reason-form">
+		<label class="field">Why are you giving it back? <span class="faint">(helps the team)</span>
+			<select name="reason">
+				<option value="">— choose —</option>
+				<option>Audio is unclear or noisy</option>
+				<option>English transcript is wrong or missing</option>
+				<option>Hindi dub is too poor to fix line by line</option>
+				<option>Topic needs a specialist</option>
+				<option>Video file does not play</option>
+				<option>No time right now</option>
+			</select>
+		</label>
+	</form>
 	{#snippet footer()}
 		<button class="ghost" onclick={() => (releaseOpen = false)}>Cancel</button>
 		<button class="danger" disabled={sending} onclick={() => send(releaseForm)}><Undo2 size={15} /> Give back</button>
 	{/snippet}
 </Modal>
+
+{#if mode === 'check'}
+<form bind:this={stopForm} method="POST" action="?/stopCheck" hidden></form>
+
+<Modal bind:open={approveOpen} title="Approve this video?">
+	<div class="summary">
+		<div><strong>{counts.checked}/{lines.length}</strong><span>checked</span></div>
+		<div><strong>{counts.edited}</strong><span>edited</span></div>
+		<div><strong>{counts.flagged}</strong><span>flagged</span></div>
+	</div>
+	<p class="muted">It is finished: {job.reviewer_name ?? 'the reviewer'} is credited with this video, and it is ready to download.</p>
+	<form bind:this={approveForm} method="POST" action="?/approve">
+		<label class="field">Note (optional)<textarea name="note" rows="2" placeholder="Anything to record"></textarea></label>
+	</form>
+	{#snippet footer()}
+		<button class="ghost" onclick={() => (approveOpen = false)}>Keep checking</button>
+		<button class="primary" disabled={sending} onclick={() => send(approveForm)}><CircleCheck size={15} /> Approve</button>
+	{/snippet}
+</Modal>
+
+<Modal bind:open={backOpen} title="Send back to {job.reviewer_name ?? 'the reviewer'}?">
+	<p class="muted">Your own fixes stay saved. They get the video back with your note and must send it again.</p>
+	<form bind:this={backForm} method="POST" action="?/sendBack">
+		<label class="field">What should they fix? <span class="faint">(required)</span><textarea name="note" rows="3" required placeholder="e.g. Lines 12–30: meaning is wrong, please re-check against the English"></textarea></label>
+	</form>
+	{#snippet footer()}
+		<button class="ghost" onclick={() => (backOpen = false)}>Cancel</button>
+		<button class="danger" disabled={sending} onclick={() => backForm?.reportValidity() && send(backForm)}><Undo2 size={15} /> Send back</button>
+	{/snippet}
+</Modal>
+{/if}
 
 <Modal bind:open={keysOpen} title="Keyboard shortcuts" width={560}>
 	<div class="keycols">
@@ -820,6 +888,10 @@
 </Modal>
 
 <style>
+	.banner.check {
+		background: #e8f3e0;
+		color: #2f4a14;
+	}
 	.editor {
 		display: flex;
 		flex-direction: column;

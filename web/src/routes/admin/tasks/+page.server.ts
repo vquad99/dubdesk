@@ -1,7 +1,7 @@
 import { listTasks } from '#lib/server/jobs.ts';
 import type { PageServerLoad } from './$types';
 
-const ALLOWED = new Set(['queued', 'assigned', 'submitted', 'approved', 'done', 'failed', 'uploaded', 'dubbing', 'processing']);
+const ALLOWED = new Set(['queued', 'assigned', 'submitted', 'approved', 'done', 'failed', 'uploaded', 'dubbing', 'processing', 'on_hold', 'trouble']);
 const PER_PAGE = 50;
 
 export const load: PageServerLoad = async ({ url }) => {

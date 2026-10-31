@@ -12,7 +12,10 @@
 		Send,
 		FileText,
 		LoaderCircle,
-		TriangleAlert
+		TriangleAlert,
+		CirclePause,
+		CirclePlay,
+		UserCheck
 	} from '@lucide/svelte';
 	import { invalidateAll } from '$app/navigation';
 	import { onMount } from 'svelte';
@@ -28,8 +31,8 @@
 	let { data }: PageProps = $props();
 
 	let show = $state<'changes' | 'all'>('changes');
-	let approveOpen = $state(false);
-	let backOpen = $state(false);
+	let holdOpen = $state(false);
+	let assignOpen = $state(false);
 	let busy = $state(false);
 
 	type S = (typeof data.segments)[number];
@@ -46,14 +49,17 @@
 	});
 	const lines = $derived(show === 'changes' ? data.segments.filter(changed) : data.segments);
 	const pct = $derived(data.task.lines ? Math.round((data.task.checked / data.task.lines) * 100) : 0);
-	const status = $derived(data.job?.status ?? data.task.video_status);
+	const held = $derived(!!data.job?.held_at);
+	const status = $derived(held ? 'on_hold' : (data.job?.status ?? data.task.video_status));
+	const canManage = $derived(!!data.job && ['queued', 'assigned', 'returned'].includes(data.job.status));
+	const trouble = $derived(data.trouble.people >= 2 || data.trouble.sentBack >= 2);
 
 	const after: SubmitFunction = () => {
 		busy = true;
 		return async ({ result, update }) => {
 			busy = false;
 			if (result.type === 'success') {
-				approveOpen = backOpen = subsOpen = false;
+				subsOpen = holdOpen = assignOpen = false;
 				toast(String(result.data?.message ?? 'Done.'));
 			} else if (result.type === 'failure') toast(String(result.data?.error ?? 'Could not do that.'), 'error');
 			await update();
@@ -69,7 +75,10 @@
 		approved: 'Approved',
 		returned: 'Sent back to reviewer',
 		unlocked: 'Unlocked by admin',
-		regenerated: 'Regenerated'
+		regenerated: 'Regenerated',
+		held: 'Stopped by admin',
+		resumed: 'Resumed by admin',
+		assigned: 'Assigned by admin'
 	};
 </script>
 
@@ -88,8 +97,12 @@
 	</div>
 	<div class="actions">
 		{#if status === 'submitted'}
-			<button class="danger" onclick={() => (backOpen = true)}><Undo2 size={16} /> Send back</button>
-			<button class="primary" onclick={() => (approveOpen = true)}><CircleCheck size={16} /> Approve</button>
+			<span class="muted small checking">{data.job?.qa_name && data.job.qa_locked_until && new Date(data.job.qa_locked_until) > new Date() ? `${data.job.qa_name} is checking it` : 'Waiting for an operator to check it'}</span>
+			{#if data.job}<a class="btn" href="/review/{data.job.id}">View lines</a>{/if}
+		{:else if held}
+			<form method="POST" action="?/resume" use:enhance={after}>
+				<button disabled={busy}><CirclePlay size={16} /> Resume</button>
+			</form>
 		{:else if status === 'assigned'}
 			<form method="POST" action="?/unlock" use:enhance={after}>
 				<button disabled={busy}><Unlock size={16} /> Take back from reviewer</button>
@@ -106,11 +119,43 @@
 		{:else if status === 'queued'}
 			<button onclick={() => (subsOpen = true)}><FileText size={16} /> Replace subtitles</button>
 		{/if}
+		{#if canManage}
+			{#if !held}<button class="danger" onclick={() => (holdOpen = true)}><CirclePause size={16} /> Stop</button>{/if}
+			<button class="primary" onclick={() => (assignOpen = true)}><UserCheck size={16} /> Assign to…</button>
+		{/if}
 		{#if data.studio}
 			<a class="btn" href={data.studio} target="_blank" rel="noopener"><ExternalLink size={15} /> Open in Sarvam Studio</a>
 		{/if}
 	</div>
 </div>
+
+{#if held}
+	<div class="alert hold fade-up">
+		<CirclePause size={18} />
+		<div><strong>Stopped{data.job?.held_at ? ` ${ago(data.job.held_at)}` : ''}.</strong> Nobody can pick this video up until you resume it or assign it.
+			{#if data.job?.hold_reason}<span class="reason">“{data.job.hold_reason}”</span>{/if}</div>
+	</div>
+{:else if trouble}
+	<div class="alert warn fade-up">
+		<TriangleAlert size={18} />
+		<div><strong>Trouble video:</strong> given back by {data.trouble.people} {data.trouble.people === 1 ? 'person' : 'people'}{data.trouble.sentBack ? `, sent back ${data.trouble.sentBack} ${data.trouble.sentBack === 1 ? 'time' : 'times'}` : ''}. Stop it, or assign it to someone you trust.</div>
+	</div>
+{/if}
+{#if data.trouble.events.length}
+	<section class="card gaveback">
+		<h3>Given back / sent back</h3>
+		<ul>
+			{#each data.trouble.events as e, i (i)}
+				<li>
+					<span class="who">{e.user_name ?? 'System'}</span>
+					<span class="what">{e.action === 'released' ? 'gave it back' : e.action === 'expired' ? 'let the lock run out' : 'sent it back (admin)'}</span>
+					{#if e.note}<span class="note">“{e.note}”</span>{/if}
+					<span class="faint when">{ago(e.created_at)}</span>
+				</li>
+			{/each}
+		</ul>
+	</section>
+{/if}
 
 <div class="layout">
 	<section class="card">
@@ -259,35 +304,108 @@
 	{/snippet}
 </Modal>
 
-<Modal bind:open={approveOpen} title="Approve this job?">
-	<form id="approve" method="POST" action="?/approve" use:enhance={after}>
-		<p class="muted">{data.task.edited} edited lines will be used when the dub is regenerated.</p>
-		<label class="field" style="margin-top:14px">
-			Note (optional)
-			<textarea name="note" rows="3" placeholder="Anything to remember about this job"></textarea>
-		</label>
+
+
+<Modal bind:open={holdOpen} title="Stop this video?">
+	<form id="hold" method="POST" action="?/hold" use:enhance={after} class="stack">
+		<p class="muted">Nobody can pick it up until you resume it.{data.job?.status === 'assigned' && data.task.reviewer ? ` ${data.task.reviewer} loses it now; their saved edits stay.` : ''}</p>
+		<label class="field">Why <span class="faint">(everyone on the task sees this)</span><textarea name="note" rows="3" required placeholder="e.g. Audio is unclear, waiting for a better source file"></textarea></label>
 	</form>
 	{#snippet footer()}
-		<button class="ghost" onclick={() => (approveOpen = false)}>Cancel</button>
-		<button class="primary" form="approve" disabled={busy}><CircleCheck size={16} /> Approve</button>
+		<button class="ghost" onclick={() => (holdOpen = false)}>Cancel</button>
+		<button class="danger" form="hold" disabled={busy}><CirclePause size={16} /> Stop</button>
 	{/snippet}
 </Modal>
 
-<Modal bind:open={backOpen} title="Send back to {data.task.reviewer ?? 'reviewer'}">
-	<form id="sendback" method="POST" action="?/sendBack" use:enhance={after}>
-		<p class="muted">The job opens again on their screen with your note on top.</p>
-		<label class="field" style="margin-top:14px">
-			What should they fix?
-			<textarea name="note" rows="4" required placeholder="e.g. Lines 4 and 9 still sound too formal."></textarea>
+<Modal bind:open={assignOpen} title="Assign to a reviewer">
+	<form id="assign" method="POST" action="?/assign" use:enhance={after} class="stack">
+		<p class="muted">The video goes straight to this person and stays theirs for 4 hours{held ? '; the stop is lifted' : ''}.{data.job?.status === 'assigned' && data.task.reviewer ? ` ${data.task.reviewer} loses it.` : ''}</p>
+		<label class="field">Reviewer
+			<select name="reviewer" required>
+				<option value="">Choose…</option>
+				{#each data.reviewers as r (r.id)}
+					{@const gaveBack = data.trouble.events.some((e) => e.user_name === r.name && e.action !== 'returned')}
+					<option value={r.id}>{r.name}{r.vendor ? ` · ${r.vendor}` : ''}{r.busy ? ' · busy on another job' : ''}{gaveBack ? ' · gave this back before' : ''}</option>
+				{/each}
+			</select>
 		</label>
+		<label class="field">Note for them <span class="faint">(optional)</span><textarea name="note" rows="2" placeholder="What to watch out for"></textarea></label>
 	</form>
 	{#snippet footer()}
-		<button class="ghost" onclick={() => (backOpen = false)}>Cancel</button>
-		<button class="primary" form="sendback" disabled={busy}><Undo2 size={16} /> Send back</button>
+		<button class="ghost" onclick={() => (assignOpen = false)}>Cancel</button>
+		<button class="primary" form="assign" disabled={busy}><UserCheck size={16} /> Assign</button>
 	{/snippet}
 </Modal>
 
 <style>
+	.checking {
+		align-self: center;
+	}
+	.alert {
+		display: flex;
+		gap: 12px;
+		align-items: flex-start;
+		padding: 14px 18px;
+		margin-bottom: 16px;
+		border-radius: var(--radius);
+		font-size: 14px;
+		line-height: 1.5;
+	}
+	.alert :global(svg) {
+		flex: none;
+		margin-top: 2px;
+	}
+	.alert.hold {
+		background: #fdecec;
+		color: #7a1010;
+	}
+	.alert.warn {
+		background: var(--orange-soft);
+		color: #7a3a07;
+	}
+	.alert .reason {
+		display: block;
+		margin-top: 2px;
+		font-style: italic;
+	}
+	.gaveback {
+		padding: 14px 18px;
+		margin-bottom: 16px;
+	}
+	.gaveback h3 {
+		font-size: 14px;
+		font-weight: 500;
+		margin-bottom: 8px;
+	}
+	.gaveback ul {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: grid;
+		gap: 6px;
+		font-size: 13.5px;
+	}
+	.gaveback li {
+		display: flex;
+		gap: 8px;
+		flex-wrap: wrap;
+		align-items: baseline;
+	}
+	.gaveback .who {
+		font-weight: 500;
+	}
+	.gaveback .note {
+		color: var(--text-2);
+		font-style: italic;
+	}
+	.gaveback .when {
+		margin-left: auto;
+		font-size: 12.5px;
+	}
+	.stack {
+		display: grid;
+		gap: 14px;
+	}
 	.back {
 		display: inline-flex;
 		align-items: center;

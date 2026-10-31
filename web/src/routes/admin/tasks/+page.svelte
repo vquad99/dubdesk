@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { Search, Upload, ChevronLeft, ChevronRight } from '@lucide/svelte';
+	import { Search, Upload, ChevronLeft, ChevronRight, TriangleAlert } from '@lucide/svelte';
 	import Badge from '#lib/components/Badge.svelte';
 	import UploadDialog from '#lib/components/UploadDialog.svelte';
 	import EmptyState from '#lib/components/EmptyState.svelte';
@@ -13,9 +13,11 @@
 		{ key: '', label: 'All' },
 		{ key: 'queued', label: 'In queue' },
 		{ key: 'assigned', label: 'With reviewer' },
-		{ key: 'submitted', label: 'Needs approval' },
+		{ key: 'submitted', label: 'Waiting for check' },
 		{ key: 'approved', label: 'Approved' },
 		{ key: 'uploaded', label: 'Waiting for dub' },
+		{ key: 'trouble', label: 'Given back 2+' },
+		{ key: 'on_hold', label: 'Stopped' },
 		{ key: 'failed', label: 'Failed' }
 	];
 	let uploadOpen = $state(false);
@@ -79,7 +81,10 @@
 								<a class="title" href="/admin/tasks/{t.video_id}">{t.title}</a>
 								<span class="meta">{duration(t.duration_sec)} · {t.lines} lines{t.round && t.round > 1 ? ` · round ${t.round}` : ''}</span>
 							</td>
-							<td><Badge status={t.job_status ?? t.video_status} /></td>
+							<td>
+								<Badge status={t.held_at ? 'on_hold' : (t.job_status ?? t.video_status)} />
+								{#if t.gave_back >= 2 || t.sent_back >= 2}<span class="trouble" title="Given back by {t.gave_back} people, sent back {t.sent_back} times"><TriangleAlert size={12} /> {t.gave_back} gave back</span>{/if}
+							</td>
 							<td>
 								{#if t.reviewer}
 									<span class="person"><span class="avatar sm">{t.reviewer.slice(0, 1)}</span>{t.reviewer}</span>
@@ -119,6 +124,14 @@
 		flex-wrap: wrap;
 		padding: 16px 20px;
 		border-bottom: 1px solid var(--line);
+	}
+	.trouble {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+		margin-top: 4px;
+		font-size: 12px;
+		color: var(--orange);
 	}
 	.tabs {
 		display: flex;
