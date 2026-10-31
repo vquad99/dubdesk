@@ -98,6 +98,9 @@
 	<div class="actions">
 		{#if status === 'submitted'}
 			<span class="muted small checking">{data.job?.qa_name && data.job.qa_locked_until && new Date(data.job.qa_locked_until) > new Date() ? `${data.job.qa_name} is checking it` : 'Waiting for an operator to check it'}</span>
+			{#if data.job?.qa_by && data.job.qa_locked_until && new Date(data.job.qa_locked_until) > new Date()}
+				<form method="POST" action="?/freeCheck" use:enhance={after}><button disabled={busy}><Unlock size={16} /> Free the check</button></form>
+			{/if}
 			{#if data.job}<a class="btn" href="/review/{data.job.id}">View lines</a>{/if}
 		{:else if held}
 			<form method="POST" action="?/resume" use:enhance={after}>

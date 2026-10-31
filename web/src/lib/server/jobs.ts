@@ -2,6 +2,8 @@ import { query, tx } from './db.ts';
 
 /** How long a pulled job stays with one reviewer before it returns to the queue. */
 export const LOCK_HOURS = 4;
+/** A check is held for an hour; working on it (edits, heartbeats) keeps extending it. */
+export const CHECK_HOURS = 1;
 
 type Q = typeof query;
 
@@ -150,9 +152,9 @@ export async function loadDeletedSegments(videoId: number) {
 export async function touchLock(jobId: number) {
 	await query(
 		`UPDATE jobs SET locked_until = CASE WHEN status = 'assigned' THEN now() + make_interval(hours => $2) ELSE locked_until END,
-		        qa_locked_until = CASE WHEN status = 'submitted' AND qa_by IS NOT NULL THEN now() + make_interval(hours => $2) ELSE qa_locked_until END
+		        qa_locked_until = CASE WHEN status = 'submitted' AND qa_by IS NOT NULL THEN now() + make_interval(hours => $3) ELSE qa_locked_until END
 		  WHERE id = $1`,
-		[jobId, LOCK_HOURS]
+		[jobId, LOCK_HOURS, CHECK_HOURS]
 	);
 }
 
@@ -194,7 +196,7 @@ export async function startCheck(jobId: number, userId: number): Promise<boolean
 			  WHERE id = $1 AND status = 'submitted'
 			    AND (qa_by IS NULL OR qa_by = $2 OR qa_locked_until <= now())
 			  RETURNING id`,
-			[jobId, userId, LOCK_HOURS]
+			[jobId, userId, CHECK_HOURS]
 		);
 		if (!rows[0]) return false;
 		const [prev] = await q<{ n: number }>(
@@ -207,10 +209,10 @@ export async function startCheck(jobId: number, userId: number): Promise<boolean
 	});
 }
 
-/** The operator stops checking without a decision; the job waits for the next check. */
-export async function releaseCheck(jobId: number, userId: number) {
+/** The operator stops checking without a decision (or the admin frees it); the job waits for the next check. */
+export async function releaseCheck(jobId: number, userId: number, anyChecker = false) {
 	await tx(async (q) => {
-		await q(`UPDATE jobs SET qa_by = NULL, qa_locked_until = NULL WHERE id = $1 AND qa_by = $2`, [jobId, userId]);
+		await q(`UPDATE jobs SET qa_by = NULL, qa_locked_until = NULL WHERE id = $1 AND ($3 OR qa_by = $2)`, [jobId, userId, anyChecker]);
 		await logEvent(q, jobId, userId, 'check_released');
 	});
 }

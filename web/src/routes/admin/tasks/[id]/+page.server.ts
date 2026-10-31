@@ -1,5 +1,5 @@
 import { error, fail } from '@sveltejs/kit';
-import { assignJob, holdJob, loadTask, resumeJob, troubleOf, unlockJob } from '#lib/server/jobs.ts';
+import { assignJob, holdJob, loadTask, releaseCheck, resumeJob, troubleOf, unlockJob } from '#lib/server/jobs.ts';
 import { query } from '#lib/server/db.ts';
 import { sarvamEnabled, studioUrl } from '#lib/server/sarvam.ts';
 import { importSubtitles, processVideo, sendToSarvam } from '#lib/server/videos.ts';
@@ -65,6 +65,15 @@ export const actions: Actions = {
 		await assignJob(job.id, job.video_id, who.id, locals.user!.id, n);
 		await track(event, 'job.assigned', { jobId: job.id, videoId: job.video_id, details: `to ${who.name}${n ? `: ${n}` : ''}` });
 		return { message: `Given to ${who.name}.` };
+	},
+
+	/** Admin frees a check an operator left open, so another operator can take it. */
+	freeCheck: async (event) => {
+		const { job } = await taskOr404(event.params.id);
+		if (!job || job.status !== 'submitted' || !job.qa_by) return fail(409, { error: 'Nobody is checking this video.' });
+		await releaseCheck(job.id, event.locals.user!.id, true);
+		await track(event, 'job.check_released', { jobId: job.id, videoId: job.video_id, details: `freed ${job.qa_name ?? ''}'s check` });
+		return { message: 'Check freed. Any operator can take it now.' };
 	},
 
 	unlock: async (event) => {
