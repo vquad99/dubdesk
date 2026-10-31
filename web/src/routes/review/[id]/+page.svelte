@@ -247,6 +247,32 @@
 		l.reviewed = !l.reviewed;
 		mark(l, { reviewed: l.reviewed });
 	}
+	/** The next line still to check after `from` (wrapping round), or null when all are checked. */
+	function nextUnchecked(from?: Line): Line | null {
+		const i = from ? lines.indexOf(from) : -1;
+		return [...lines.slice(i + 1), ...lines.slice(0, i + 1)].find((q) => !q.reviewed) ?? null;
+	}
+	function goTo(l: Line, focusText = false) {
+		select(l.id, true);
+		seekTo(l.start);
+		if (focusText) requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(`#line-${l.id} textarea[data-lang="hi"]`)?.focus());
+	}
+	/** Mark this line checked and move to the next one still to check: the reviewer's main loop. */
+	function checkAndNext(l: Line, focusText = false) {
+		if (!l.reviewed) toggleChecked(l);
+		const next = nextUnchecked(l);
+		if (next) goTo(next, focusText);
+		else toast('Every line is checked. Send it to the admin when ready.');
+	}
+	function jumpToUnchecked() {
+		const next = nextUnchecked(current ?? undefined);
+		if (next) goTo(next);
+		else toast('Every line is checked.');
+	}
+
+	// Hindi needs about 15 letters a second to be spoken comfortably; above this the dub will rush or overrun.
+	const MAX_CPS = 17;
+	const speechRate = (l: Line) => l.hi.replace(/\s+/g, '').length / Math.max(0.1, l.end - l.start);
 	function resetLine(l: Line) {
 		l.hi = l.original;
 		mark(l, { hi_text: l.hi });
@@ -368,7 +394,7 @@
 			state: l.flag ? 'flagged' : isEdited(l) ? 'edited' : l.reviewed ? 'checked' : 'plain'
 		}))
 	);
-	const cps = (l: Line) => (l.hi.replace(/\s+/g, '').length / Math.max(0.1, l.end - l.start)).toFixed(1);
+	const cps = (l: Line) => speechRate(l).toFixed(1);
 
 	// ---------- find & replace ----------
 	let findOpen = $state(false);
@@ -434,6 +460,11 @@
 		}
 		if (typing) {
 			if (e.key === 'Escape') (e.target as HTMLElement).blur();
+			// Ctrl/Cmd+Enter while typing a line: done with it, go to the next one to check.
+			else if (mod && e.key === 'Enter' && editable && current) {
+				e.preventDefault();
+				checkAndNext(current, true);
+			}
 			return;
 		}
 		const k = e.key;
@@ -453,7 +484,10 @@
 		else if (k === '+' || k === '=') wave?.zoomBy(1.25);
 		else if (k === '-') wave?.zoomBy(0.8);
 		else if (!editable) return;
-		else if (k === 'c' && current) toggleChecked(current);
+		else if (k === 'c' && current) {
+			if (current.reviewed) toggleChecked(current);
+			else checkAndNext(current);
+		} else if (k === 'n') jumpToUnchecked();
 		else if (k === 's' && current) split();
 		else if (k === 'm' && current) merge();
 		else if (k === 'i') insert();
@@ -503,7 +537,10 @@
 		<strong class="title">{job.title}</strong>
 		<span class="chip lang-chip"><i></i>Hindi</span>
 		<span class="chip">Round {job.round}</span>
-		<span class="chip">{counts.checked}/{lines.length} checked</span>
+		<button class="chip checkchip" class:complete={counts.checked === lines.length} title="Go to the next line to check (N)" onclick={jumpToUnchecked} style="--p: {pct}%">
+			<span class="bar-fill" aria-hidden="true"></span>
+			<span class="label">{counts.checked}/{lines.length} checked</span>
+		</button>
 		<div class="spacer"></div>
 		{#if editable}
 			<span class="save {saveState}" aria-live="polite">
@@ -583,9 +620,10 @@
 								<span class="pill time plain">{short(l.start)} – {short(l.end)}</span>
 								{#if l.flag}<span class="pill bad">{FLAG_LABEL[l.flag]}</span>{/if}
 								{#if changedText}<span class="pill warnp">Edited</span>{/if}
+								{#if speechRate(l) > MAX_CPS}<span class="pill bad" title="{speechRate(l).toFixed(0)} letters a second; under {MAX_CPS} fits the timing. Shorten the Hindi or give the line more time.">Too long to speak</span>{/if}
 								<span class="spacer"></span>
-								{#if editable && (active === l.id || l.reviewed)}
-									<button class="tick" class:on={l.reviewed} title={l.reviewed ? 'Checked (C)' : 'Mark as checked (C)'} aria-pressed={l.reviewed} onclick={(e) => (e.stopPropagation(), toggleChecked(l))}>
+								{#if editable}
+									<button class="tick" class:on={l.reviewed} title={l.reviewed ? 'Checked: click to undo' : 'Mark as checked and go to the next line (C)'} aria-pressed={l.reviewed} onclick={(e) => (e.stopPropagation(), l.reviewed ? toggleChecked(l) : checkAndNext(l))}>
 										<CircleCheck size={14} />{l.reviewed ? 'Checked' : 'Check'}
 									</button>
 								{:else if !editable && l.reviewed}<span class="pill okp">Checked</span>{/if}
@@ -772,7 +810,9 @@
 			<dt><span class="kbd">M</span></dt><dd>Join with next line</dd>
 			<dt><span class="kbd">I</span></dt><dd>Add a line</dd>
 			<dt><span class="kbd">Del</span></dt><dd>Remove line</dd>
-			<dt><span class="kbd">C</span></dt><dd>Mark as checked</dd>
+			<dt><span class="kbd">C</span></dt><dd>Mark as checked, go to the next line</dd>
+			<dt><span class="kbd">Ctrl</span> <span class="kbd">Enter</span></dt><dd>While typing: checked, next line</dd>
+			<dt><span class="kbd">N</span></dt><dd>Jump to the next line to check</dd>
 			<dt><span class="kbd">Ctrl</span> <span class="kbd">S</span> / <span class="kbd">F</span></dt><dd>Save / find & replace</dd>
 		</dl>
 	</div>
@@ -811,6 +851,27 @@
 	.bar .chip {
 		background: #fff;
 		box-shadow: 0 0 0 1px var(--line);
+	}
+	.chip.checkchip {
+		position: relative;
+		overflow: hidden;
+		min-height: 0;
+		font-size: inherit;
+		font-weight: 500;
+		cursor: pointer;
+	}
+	.chip.checkchip .bar-fill {
+		position: absolute;
+		inset: 0 auto 0 0;
+		width: var(--p);
+		background: linear-gradient(90deg, var(--accent-soft), #dfe6fb);
+		transition: width 0.4s var(--ease);
+	}
+	.chip.checkchip.complete .bar-fill {
+		background: #e3f1d8;
+	}
+	.chip.checkchip .label {
+		position: relative;
 	}
 	.lang-chip i {
 		width: 9px;

@@ -25,7 +25,7 @@ export const actions: Actions = {
 		const { job } = await taskOr404(params.id);
 		if (!job || job.status !== 'submitted') return fail(409, { error: 'Only a job waiting for approval can be approved.' });
 		const n = note(await request.formData());
-		await approveJob(job.id, locals.user!.id, n);
+		await approveJob(job.id, job.video_id, locals.user!.id, n);
 		await track(event, 'job.approved', { jobId: job.id, videoId: job.video_id, details: n ?? job.title });
 		return { message: 'Approved.' };
 	},
@@ -54,7 +54,7 @@ export const actions: Actions = {
 	sarvam: async (event) => {
 		const { params } = event;
 		try {
-			await sendToSarvam(Number(params.id));
+			await sendToSarvam(Number(params.id), event.locals.user!.id);
 			await track(event, 'video.sent_to_sarvam', { videoId: Number(params.id) });
 		} catch (e) {
 			return fail(400, { error: (e as Error).message });

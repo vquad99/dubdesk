@@ -8,7 +8,7 @@
 	import '../app.css';
 	import favicon from '#lib/assets/favicon.svg';
 	import { page } from '$app/state';
-	import { LayoutDashboard, ListVideo, Headphones, Activity, Users, LogOut, History, UserRound } from '@lucide/svelte';
+	import { LayoutDashboard, ListVideo, Headphones, Activity, Users, LogOut, History, UserRound, Gauge } from '@lucide/svelte';
 	import Toaster from '#lib/components/Toaster.svelte';
 	import type { LayoutProps } from './$types';
 
@@ -20,6 +20,7 @@
 		{ href: '/review', label: 'Review', icon: Headphones, roles: ['admin', 'reviewer'] },
 		{ href: '/operator', label: 'Progress', icon: Activity, roles: ['admin', 'operator'] },
 		{ href: '/admin/users', label: 'Users', icon: Users, roles: ['admin'] },
+		{ href: '/admin/usage', label: 'Sarvam usage', icon: Gauge, roles: ['admin'] },
 		{ href: '/admin/activity', label: 'Activity log', icon: History, roles: ['admin'] },
 		{ href: '/profile', label: 'My profile', icon: UserRound, roles: ['admin', 'reviewer', 'operator'] }
 	];

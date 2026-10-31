@@ -1,9 +1,11 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import { ArrowRight, LoaderCircle } from '@lucide/svelte';
+	import { page } from '$app/state';
 	import type { PageProps } from './$types';
 
 	let { form }: PageProps = $props();
+	const done = $derived(page.url.searchParams.get('done'));
 	let busy = $state(false);
 </script>
 
@@ -39,15 +41,29 @@
 				Password
 				<input name="password" type="password" autocomplete="current-password" required />
 			</label>
-			{#if form?.error}<p class="error msg">{form.error}</p>{/if}
+			{#if form?.error}<p class="error msg">{form.error}</p>
+			{:else if done === 'reset' || done === 'welcome'}<p class="ok msg">{done === 'welcome' ? 'Your password is set. Log in to start.' : 'Password changed. Log in with the new one.'}</p>{/if}
 			<button class="primary submit" disabled={busy}>
 				{#if busy}<LoaderCircle size={16} class="spin" />Signing in{:else}Log in <ArrowRight size={16} />{/if}
 			</button>
+			<a class="forgot" href="/login/forgot">Forgot password?</a>
 		</form>
 	</section>
 </div>
 
 <style>
+	.forgot {
+		justify-self: center;
+		font-size: 13px;
+		color: var(--muted);
+	}
+	.forgot:hover {
+		color: var(--accent);
+	}
+	.ok.msg {
+		color: var(--ok);
+		font-size: 14px;
+	}
 	.page {
 		position: relative;
 		min-height: 100vh;

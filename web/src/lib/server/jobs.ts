@@ -373,12 +373,14 @@ export async function submitJob(jobId: number, videoId: number, userId: number, 
 }
 
 /** Admin accepts the reviewer's work. The dub is then regenerated from the corrected lines. */
-export async function approveJob(jobId: number, adminId: number, note: string | null) {
+export async function approveJob(jobId: number, videoId: number, adminId: number, note: string | null) {
 	await tx(async (q) => {
 		await q(
 			`UPDATE jobs SET status = 'approved', reviewed_by = $2, reviewed_at = now(), admin_note = $3 WHERE id = $1`,
 			[jobId, adminId, note]
 		);
+		// The video is finished once its review is approved.
+		await q(`UPDATE videos SET status = 'done', updated_at = now() WHERE id = $1`, [videoId]);
 		await logEvent(q, jobId, adminId, 'approved', note);
 	});
 }

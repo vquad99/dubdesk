@@ -438,3 +438,68 @@ td:last-child {
 		transition-duration: 0.01ms !important;
 	}
 }
+
+/* ---------- small auth pages (2-step, forgot, reset) ---------- */
+.auth-page {
+	position: relative;
+	min-height: 100vh;
+	display: grid;
+	place-items: center;
+	padding: 16px;
+	overflow: hidden;
+}
+.auth-glow {
+	position: absolute;
+	inset: -120px 0 auto 0;
+	height: 560px;
+	z-index: -1;
+	background:
+		radial-gradient(ellipse 26% 42% at 50% 8%, rgba(249, 115, 12, 0.8), transparent 72%),
+		radial-gradient(ellipse 70% 85% at 50% 0%, rgba(190, 210, 255, 1), transparent 82%);
+	filter: blur(18px);
+}
+.auth-box {
+	width: min(420px, 100%);
+	padding: 32px 28px;
+	display: grid;
+	gap: 14px;
+	justify-items: center;
+	text-align: center;
+	box-shadow: var(--shadow-3);
+}
+.auth-box h1 {
+	font-size: 28px;
+}
+.auth-box form {
+	display: grid;
+	gap: 12px;
+	width: 100%;
+}
+.auth-box .primary {
+	min-height: 46px;
+}
+.auth-icon {
+	display: grid;
+	place-items: center;
+	width: 54px;
+	height: 54px;
+	border-radius: 16px;
+	background: var(--accent-soft);
+	color: var(--accent);
+}
+.auth-icon.warn {
+	background: var(--orange-soft);
+	color: var(--orange);
+}
+.small-link {
+	font-size: 13px;
+	color: var(--muted);
+}
+.spin {
+	animation: spin 0.9s linear infinite;
+}
+@keyframes spin {
+	to {
+		transform: rotate(360deg);
+	}
+}

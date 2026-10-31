@@ -201,10 +201,10 @@ export async function importSubtitles(videoId: number, userId: number | null, en
 
 // ---------------- Sarvam ----------------
 
-export async function sendToSarvam(videoId: number) {
+export async function sendToSarvam(videoId: number, userId: number | null = null) {
 	if (!sarvam.sarvamEnabled()) throw new Error('Sarvam is not connected yet (SARVAM_API_KEY is not set).');
-	const [v] = await query<{ title: string; source_key: string; mime: string; size_bytes: string; status: string }>(
-		'SELECT title, source_key, mime, size_bytes, status FROM videos WHERE id = $1',
+	const [v] = await query<{ title: string; source_key: string; mime: string; size_bytes: string; status: string; duration_sec: string | null }>(
+		'SELECT title, source_key, mime, size_bytes, status, duration_sec FROM videos WHERE id = $1',
 		[videoId]
 	);
 	if (!v?.source_key) throw new Error('This video has no uploaded file.');
@@ -218,6 +218,13 @@ export async function sendToSarvam(videoId: number) {
 		await sarvam.uploadSource(job.upload_url, v.source_key, v.mime, Number(v.size_bytes));
 		await sarvam.startJob(job.job_id);
 		await query(`UPDATE videos SET sarvam_status = 'queued', next_poll_at = now() + interval '20 seconds' WHERE id = $1`, [videoId]);
+		// Sarvam bills dubbing by the minute of video: record who started it and for how long.
+		const minutes = Math.round((Number(v.duration_sec ?? 0) / 60) * 100) / 100;
+		await query(
+			`INSERT INTO credits_log (video_id, action, credits, minutes, user_id, sarvam_job_id, note)
+			 VALUES ($1, 'dub', 0, $2, $3, $4, $5)`,
+			[videoId, minutes, userId, job.job_id, v.title]
+		);
 	} catch (e) {
 		await query(`UPDATE videos SET status = 'failed', error = $2, updated_at = now() WHERE id = $1`, [videoId, (e as Error).message]);
 		throw e;

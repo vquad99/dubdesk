@@ -14,6 +14,8 @@ export const ACTIVITY: Record<string, ActivityKind> = {
 	'auth.2fa_disabled': { label: 'turned off two-step login', tone: 'warn', group: 'auth' },
 	'auth.password_changed': { label: 'changed their password', tone: 'accent', group: 'auth' },
 	'auth.sessions_ended': { label: 'logged out other devices', tone: 'neutral', group: 'auth' },
+	'auth.reset_requested': { label: 'asked for a password reset', tone: 'warn', group: 'auth' },
+	'auth.password_reset': { label: 'set a new password with a link', tone: 'accent', group: 'auth' },
 	'user.2fa_reset': { label: "reset a user's two-step login", tone: 'accent', group: 'user' },
 	'job.created': { label: 'created the review job for', tone: 'neutral', group: 'job' },
 	'job.claimed': { label: 'picked up', tone: 'info', group: 'job' },
@@ -39,7 +41,10 @@ export const ACTIVITY: Record<string, ActivityKind> = {
 	'file.downloaded': { label: 'downloaded', tone: 'neutral', group: 'file' },
 	'user.created': { label: 'added a user', tone: 'accent', group: 'user' },
 	'user.updated': { label: 'changed a user', tone: 'accent', group: 'user' },
-	'user.password_set': { label: "set a user's password", tone: 'accent', group: 'user' }
+	'user.password_set': { label: "set a user's password", tone: 'accent', group: 'user' },
+	'user.reset_link': { label: 'made a password link for a user', tone: 'accent', group: 'user' },
+	'user.bulk_created': { label: 'added users in bulk', tone: 'accent', group: 'user' },
+	'settings.sarvam': { label: 'changed the Sarvam price / plan', tone: 'accent', group: 'user' }
 };
 
 export const ACTIVITY_GROUPS = [
