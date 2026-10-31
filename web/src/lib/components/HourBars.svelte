@@ -10,10 +10,17 @@
 	let hover = $state<number | null>(null);
 
 	const max = $derived(Math.max(4, ...hours.map((h) => h.checked)));
-	const step = $derived(max <= 8 ? 2 : max <= 20 ? 5 : max <= 50 ? 10 : max <= 200 ? 50 : 100);
+	// About four gridlines whatever the size: 1, 2 or 5 times a power of ten.
+	const step = $derived.by(() => {
+		const raw = max / 4;
+		const p = 10 ** Math.floor(Math.log10(raw));
+		const f = raw / p;
+		return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * p;
+	});
 	const top = $derived(Math.ceil(max / step) * step);
 	const ticks = $derived(Array.from({ length: Math.floor(top / step) + 1 }, (_, i) => i * step));
-	const LEFT = 30;
+	// Room for the widest y label (e.g. "2000").
+	const LEFT = $derived(14 + String(top).length * 7);
 	const slot = $derived((width - LEFT) / Math.max(1, hours.length));
 	const bw = $derived(Math.max(4, Math.min(22, slot - 4)));
 	const y = (v: number) => TOP + (H - TOP - BOTTOM) * (1 - v / top);

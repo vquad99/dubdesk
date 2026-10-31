@@ -54,6 +54,21 @@
 	const single = $derived(series.length === 1);
 </script>
 
+{#if labels.length === 1}
+	<!-- One period only: a line needs two points, so rank the values as bars instead. -->
+	{@const ranked = [...series].sort((a, b) => Number(a.key === 'other') - Number(b.key === 'other') || b.values[0] - a.values[0])}
+	{@const top = Math.max(1, ...ranked.map((s) => s.values[0]))}
+	<div class="rank" role="list" aria-label="{tipLabel(labels[0])}">
+		<p class="rank-day">{tipLabel(labels[0])}</p>
+		{#each ranked as s (s.key)}
+			<div class="rank-row" role="listitem">
+				<span class="rank-name"><i style="background:{colorOf(s.key)}"></i>{s.name}</span>
+				<span class="rank-bar"><b style="width:{(s.values[0] / top) * 100}%; background:{colorOf(s.key)}"></b></span>
+				<span class="rank-v">{format(s.values[0])}</span>
+			</div>
+		{/each}
+	</div>
+{:else}
 <div class="chart" bind:clientWidth={width}>
 	{#if series.length > 1}
 		<ul class="legend">
@@ -77,7 +92,7 @@
 		{#if labels.length <= 31}
 			{#each series as s (s.key)}
 				{#each s.values as v, i (i)}
-					{#if v > 0 && (single || hover === i)}<circle cx={x(i)} cy={y(v)} r="3.5" fill={colorOf(s.key)} stroke="var(--panel)" stroke-width="2" />{/if}
+					{#if v > 0 && (single || hover === i || labels.length <= 2)}<circle cx={x(i)} cy={y(v)} r="3.5" fill={colorOf(s.key)} stroke="var(--panel)" stroke-width="2" />{/if}
 				{/each}
 			{/each}
 		{/if}
@@ -100,8 +115,56 @@
 		</div>
 	{/if}
 </div>
+{/if}
 
 <style>
+	.rank {
+		display: grid;
+		gap: 8px;
+	}
+	.rank-day {
+		margin: 0 0 4px;
+		font-size: 13px;
+		color: var(--muted);
+	}
+	.rank-row {
+		display: grid;
+		grid-template-columns: minmax(120px, 200px) 1fr 70px;
+		gap: 12px;
+		align-items: center;
+		font-size: 13.5px;
+	}
+	.rank-name {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		overflow: hidden;
+		white-space: nowrap;
+		text-overflow: ellipsis;
+		color: var(--text-2);
+	}
+	.rank-name i {
+		width: 10px;
+		height: 10px;
+		border-radius: 3px;
+		flex: none;
+	}
+	.rank-bar {
+		height: 10px;
+		border-radius: 999px;
+		background: var(--surface-2);
+		overflow: hidden;
+	}
+	.rank-bar b {
+		display: block;
+		height: 100%;
+		border-radius: 0 4px 4px 0;
+	}
+	.rank-v {
+		text-align: right;
+		font-variant-numeric: tabular-nums;
+		font-weight: 500;
+	}
 	.chart {
 		position: relative;
 		width: 100%;

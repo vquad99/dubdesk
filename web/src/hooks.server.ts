@@ -24,7 +24,11 @@ const AREAS: [prefix: string, roles: Role[]][] = [
 ];
 
 // Requests per minute. Media is seeked in many small Range requests, so it gets more room.
+// Signed-in people are limited one by one; a whole office often shares one internet address, so the
+// per-address limit is a much higher flood guard (and the only limit before someone signs in).
 const LIMITS = { page: 300, api: 600, media: 2400 };
+const PER_ADDRESS = { page: 3000, api: 12000, media: 30000 };
+const ANON = { page: 300, api: 600, media: 600 };
 
 const prefixed = (path: string, p: string) => path === p || path.startsWith(p + '/');
 
@@ -107,10 +111,14 @@ const gate: Handle = async ({ event, resolve }) => {
 	}
 
 	const kind = path.startsWith('/api/media/') ? 'media' : path.startsWith('/api/') ? 'api' : 'page';
-	const lim = allow(`${kind}:${ip}`, LIMITS[kind], 60_000);
-	if (!lim.ok) return done(tooMany(lim.retryAfter));
+	const byAddress = allow(`${kind}:${ip}`, PER_ADDRESS[kind], 60_000);
+	if (!byAddress.ok) return done(tooMany(byAddress.retryAfter));
 
 	const session = await getSession(event.cookies.get(SESSION_COOKIE));
+	const lim = session
+		? allow(`${kind}:u${session.user.id}`, LIMITS[kind], 60_000)
+		: allow(`${kind}:anon:${ip}`, ANON[kind], 60_000);
+	if (!lim.ok) return done(tooMany(lim.retryAfter));
 	event.locals.user = session && !session.pending2fa ? session.user : null;
 	event.locals.pending = session?.pending2fa ? session.user : null;
 	event.locals.sessionId = session?.sessionId ?? null;

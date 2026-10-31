@@ -274,8 +274,12 @@ export async function live() {
 			   SELECT user_id, MAX(last_seen_at) AS last_seen FROM sessions
 			    WHERE last_seen_at > now() - interval '5 minutes' AND NOT pending_2fa AND expires_at > now() GROUP BY user_id),
 			 beat AS (
-			   SELECT DISTINCT ON (user_id) user_id, job_id, last_beat FROM work_slots
-			    WHERE last_beat > now() - interval '2 minutes' ORDER BY user_id, last_beat DESC),
+			   SELECT DISTINCT ON (w.user_id) w.user_id, w.job_id, w.last_beat FROM work_slots w
+			     JOIN jobs jb ON jb.id = w.job_id
+			    WHERE w.last_beat > now() - interval '2 minutes'
+			      AND ((jb.status = 'assigned' AND jb.assigned_to = w.user_id AND jb.locked_until > now())
+			        OR (jb.status = 'submitted' AND jb.qa_by = w.user_id AND jb.qa_locked_until > now()))
+			    ORDER BY w.user_id, w.last_beat DESC),
 			 hr AS (
 			   SELECT user_id, ${SUMS} FROM (${EVENTS}) e GROUP BY user_id)
 			 SELECT u.id, u.name, u.role, u.vendor,
