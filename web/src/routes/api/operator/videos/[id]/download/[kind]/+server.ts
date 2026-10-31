@@ -1,3 +1,4 @@
+import { csvCell } from '#lib/server/csv.ts';
 import { error } from '@sveltejs/kit';
 import { query } from '#lib/server/db.ts';
 import { loadSegments } from '#lib/server/jobs.ts';
@@ -7,7 +8,6 @@ import { track } from '#lib/server/activity.ts';
 import type { RequestHandler } from './$types';
 
 const safe = (s: string) => s.replace(/[^\p{L}\p{N} ._-]+/gu, '').trim().slice(0, 80) || 'video';
-const csvCell = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
 
 /**
  * Downloads for operators and admins:

@@ -91,4 +91,18 @@ export async function heartbeat(jobId: number, userId: number) {
 		   last_beat = now()`,
 		[jobId, userId]
 	);
+	// Same time in 10-minute slots for the hourly and live views. The gap is measured from the
+	// person's last beat in any slot, so a slot change does not lose the seconds in between.
+	await query(
+		`WITH prev AS (SELECT MAX(last_beat) AS t FROM work_slots WHERE user_id = $2 AND slot >= now() - interval '20 minutes')
+		 INSERT INTO work_slots (user_id, job_id, slot, seconds, last_beat)
+		 SELECT $2, $1, to_timestamp(floor(EXTRACT(EPOCH FROM now()) / 600) * 600),
+		        CASE WHEN prev.t IS NOT NULL AND now() - prev.t < interval '90 seconds'
+		             THEN EXTRACT(EPOCH FROM now() - prev.t)::int ELSE 0 END,
+		        now()
+		   FROM prev
+		 ON CONFLICT (user_id, slot) DO UPDATE SET
+		   seconds = LEAST(600, work_slots.seconds + EXCLUDED.seconds), job_id = EXCLUDED.job_id, last_beat = now()`,
+		[jobId, userId]
+	);
 }

@@ -44,7 +44,8 @@ export const ACTIVITY: Record<string, ActivityKind> = {
 	'user.password_set': { label: "set a user's password", tone: 'accent', group: 'user' },
 	'user.reset_link': { label: 'made a password link for a user', tone: 'accent', group: 'user' },
 	'user.bulk_created': { label: 'added users in bulk', tone: 'accent', group: 'user' },
-	'settings.sarvam': { label: 'changed the Sarvam price / plan', tone: 'accent', group: 'user' }
+	'settings.sarvam': { label: 'changed the Sarvam price / plan', tone: 'accent', group: 'user' },
+	'settings.pay': { label: 'changed the default pay rates', tone: 'accent', group: 'user' }
 };
 
 export const ACTIVITY_GROUPS = [

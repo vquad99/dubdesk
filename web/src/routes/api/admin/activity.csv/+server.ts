@@ -1,8 +1,8 @@
+import { csvCell as cell } from '#lib/server/csv.ts';
 import { listActivity } from '#lib/server/activity.ts';
 import { describe } from '#lib/activity.ts';
 import type { RequestHandler } from './$types';
 
-const cell = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
 const isDate = (s: string | null) => (s && /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : undefined);
 
 /** The activity log as CSV, same filters as the page, up to 5,000 newest rows. */

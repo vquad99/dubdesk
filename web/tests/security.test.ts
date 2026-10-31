@@ -31,3 +31,26 @@ describe('request limits', () => {
 		expect(r.retryAfter).toBeGreaterThan(0);
 	});
 });
+
+import { safeNext } from '../src/lib/server/redirect.ts';
+import { csvCell } from '../src/lib/server/csv.ts';
+
+describe('redirect after login', () => {
+	it('keeps on-site paths', () => {
+		expect(safeNext('/review/12?x=1')).toBe('/review/12?x=1');
+	});
+	it('refuses anything that could leave the site', () => {
+		for (const bad of ['//evil.com', '/\\evil.com', 'https://evil.com', '/\\/evil.com', '/a\nb', 'evil.com', ''])
+			expect(safeNext(bad)).toBeNull();
+	});
+});
+
+describe('CSV export', () => {
+	it('neutralises spreadsheet formulas', () => {
+		expect(csvCell('=HYPERLINK("http://x")')).toBe(`"'=HYPERLINK(""http://x"")"`);
+		expect(csvCell('+1')).toBe(`"'+1"`);
+		expect(csvCell('@SUM(A1)')).toBe(`"'@SUM(A1)"`);
+		expect(csvCell('Asha')).toBe('"Asha"');
+		expect(csvCell(12.5)).toBe('12.5');
+	});
+});

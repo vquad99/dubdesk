@@ -20,8 +20,12 @@ export const load: PageServerLoad = async () => {
 			last_login_at: Date | null;
 			totp_enabled: boolean;
 			invited: boolean;
+			vendor: string | null;
+			pay_per_min: string | null;
+			pay_per_hour: string | null;
+			pay_per_line: string | null;
 		}>(
-			`SELECT u.id, u.email, u.name, u.role, u.active, u.last_login_at, u.totp_enabled,
+			`SELECT u.id, u.email, u.name, u.role, u.active, u.last_login_at, u.totp_enabled, u.vendor, u.pay_per_min, u.pay_per_hour, u.pay_per_line,
 			        (u.last_login_at IS NULL AND EXISTS (SELECT 1 FROM password_links l WHERE l.user_id = u.id AND l.kind = 'invite')) AS invited
 			   FROM users u ORDER BY u.active DESC, u.role, u.name`
 		),
@@ -154,7 +158,19 @@ export const actions: Actions = {
 		if (id === locals.user!.id && (role !== 'admin' || !active)) {
 			return fail(400, { error: 'You cannot remove your own admin access.' });
 		}
-		await query('UPDATE users SET role = $2, active = $3 WHERE id = $1', [id, role, active]);
+		// Vendor and own pay rates: empty = use the default rate from Analytics.
+		const vendor = String(f.get('vendor') ?? '').trim().slice(0, 120) || null;
+		const rate = (k: string) => {
+			const raw = String(f.get(k) ?? '').trim();
+			if (!raw) return null;
+			const n = Number(raw);
+			return Number.isFinite(n) && n >= 0 && n <= 1_000_000 ? n : NaN;
+		};
+		const rates = [rate('pay_per_min'), rate('pay_per_hour'), rate('pay_per_line')];
+		if (rates.some((r) => Number.isNaN(r))) return fail(400, { error: 'Rates must be numbers of 0 or more.' });
+		await query('UPDATE users SET role = $2, active = $3, vendor = $4, pay_per_min = $5, pay_per_hour = $6, pay_per_line = $7 WHERE id = $1', [
+			id, role, active, vendor, ...rates
+		]);
 		if (!active) await query('DELETE FROM sessions WHERE user_id = $1', [id]);
 		await track(event, 'user.updated', { details: `user ${id}: role ${role}, ${active ? 'active' : 'turned off'}` });
 		return { message: 'Saved.' };

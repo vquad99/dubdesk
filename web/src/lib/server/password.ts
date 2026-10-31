@@ -9,6 +9,13 @@ export function hashPassword(password: string): string {
 	return `scrypt$${N}$${salt.toString('base64')}$${hash.toString('base64')}`;
 }
 
+// Checked against when the e-mail has no account, so a wrong e-mail takes as long as a wrong password.
+const DUMMY = hashPassword('dubdesk-no-such-user');
+export function burnPasswordCheck(password: string): false {
+	verifyPassword(password, DUMMY);
+	return false;
+}
+
 export function verifyPassword(password: string, stored: string): boolean {
 	const [algo, n, saltB64, hashB64] = stored.split('$');
 	if (algo !== 'scrypt' || !saltB64 || !hashB64) return false;

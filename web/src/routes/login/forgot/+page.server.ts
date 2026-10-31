@@ -26,23 +26,27 @@ export const actions: Actions = {
 		const byEmail = allow(`forgot-mail:${email}`, 3, 60 * 60_000);
 		if (!byIp.ok || !byEmail.ok) return fail(429, { email, error: 'Too many requests. Try again later.' });
 
-		const [user] = await query<{ id: number; name: string }>('SELECT id, name FROM users WHERE email = $1 AND active', [email]);
-		if (user) {
-			await track(event, 'auth.reset_requested', { userId: user.id, details: email });
-			let mailed = false;
-			if (mailEnabled()) {
-				const link = await createLink(user.id, 'reset', null, url.origin);
-				mailed = await sendLinkMail(email, user.name, 'reset', link.url, link.hours);
+		// The work runs after the answer is sent, so the reply takes the same time whether or not
+		// the e-mail has an account (no probing for accounts by timing).
+		void (async () => {
+			const [user] = await query<{ id: number; name: string }>('SELECT id, name FROM users WHERE email = $1 AND active', [email]);
+			if (user) {
+				await track(event, 'auth.reset_requested', { userId: user.id, details: email });
+				let mailed = false;
+				if (mailEnabled()) {
+					const link = await createLink(user.id, 'reset', null, url.origin);
+					mailed = await sendLinkMail(email, user.name, 'reset', link.url, link.hours);
+				}
+				// No e-mail service (or it failed): the admin sees the request on the Users page.
+				if (!mailed) {
+					await query(
+						`INSERT INTO password_requests (user_id, ip)
+						 SELECT $1, $2 WHERE NOT EXISTS (SELECT 1 FROM password_requests WHERE user_id = $1 AND handled_at IS NULL)`,
+						[user.id, ip]
+					);
+				}
 			}
-			// No e-mail service (or it failed): the admin sees the request on the Users page.
-			if (!mailed) {
-				await query(
-					`INSERT INTO password_requests (user_id, ip)
-					 SELECT $1, $2 WHERE NOT EXISTS (SELECT 1 FROM password_requests WHERE user_id = $1 AND handled_at IS NULL)`,
-					[user.id, ip]
-				);
-			}
-		}
+		})().catch((e) => console.error('[forgot] request failed', e));
 		return { sent: SENT };
 	}
 };

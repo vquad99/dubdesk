@@ -42,7 +42,9 @@ export const GET: RequestHandler = async ({ params, request, locals }) => {
 		case 'source': {
 			const key = v.web_key ?? v.source_key;
 			if (!key) error(404, 'No video yet');
-			return serve(key, v.web_key ? 'video/mp4' : (v.mime ?? 'video/mp4'), cond);
+			// The upload's own type is trusted only if it is audio/video; anything else is served as plain MP4.
+			const mime = v.web_key || !/^(video|audio)\/[\w.+-]+$/.test(v.mime ?? '') ? 'video/mp4' : v.mime!;
+			return serve(key, mime, cond);
 		}
 		case 'dubbed':
 			if (!v.dubbed_key) error(404, 'No Hindi video yet');

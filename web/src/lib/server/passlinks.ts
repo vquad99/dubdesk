@@ -11,6 +11,12 @@ export const MIN_PASSWORD = 10;
 const idOf = (token: string) => createHash('sha256').update(token).digest('hex');
 
 /** A one-time link to set a password. Earlier unused links for the same person stop working. */
+/** The site address for links sent out. APP_ORIGIN (e.g. https://dubdesk.onrender.com) wins over the request's Host. */
+export function siteOrigin(requestOrigin: string): string {
+	const o = process.env.APP_ORIGIN?.trim();
+	return o && /^https?:\/\/[^/]+$/.test(o) ? o : requestOrigin;
+}
+
 export async function createLink(userId: number, kind: LinkKind, createdBy: number | null, origin: string, hours: number = HOURS[kind]) {
 	const token = randomBytes(32).toString('base64url');
 	await tx(async (q) => {
@@ -21,7 +27,7 @@ export async function createLink(userId: number, kind: LinkKind, createdBy: numb
 			[idOf(token), userId, kind, createdBy, hours]
 		);
 	});
-	return { url: `${origin}/login/reset/${token}`, hours };
+	return { url: `${siteOrigin(origin)}/login/reset/${token}`, hours };
 }
 
 export type LinkInfo = { userId: number; email: string; name: string; kind: LinkKind };

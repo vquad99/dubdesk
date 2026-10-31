@@ -32,7 +32,7 @@ function harden(res: Response, https: boolean, path: string): Response {
 	const h = res.headers;
 	h.set('X-Content-Type-Options', 'nosniff');
 	h.set('X-Frame-Options', 'DENY');
-	h.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+	if (!h.has('Referrer-Policy')) h.set('Referrer-Policy', 'strict-origin-when-cross-origin');
 	h.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()');
 	h.set('Cross-Origin-Opener-Policy', 'same-origin');
 	h.set('Cross-Origin-Resource-Policy', 'same-origin');
@@ -96,13 +96,13 @@ const gate: Handle = async ({ event, resolve }) => {
 		/* behind a proxy without the address header */
 	}
 
-	// Cross-site writes to the API are refused outright: a same-site fetch always carries a
-	// matching Origin (or Sec-Fetch-Site), so only a forged request lacks one.
-	if (path.startsWith('/api/') && method !== 'GET' && method !== 'HEAD') {
+	// Cross-site writes are refused outright, for pages (form actions) and the API alike: a same-site
+	// request always carries a matching Origin (or Sec-Fetch-Site), so only a forged one lacks it.
+	if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
 		const origin = event.request.headers.get('origin');
 		const site = event.request.headers.get('sec-fetch-site');
-		if ((origin && origin !== event.url.origin) || (!origin && site && site !== 'same-origin')) {
-			return done(new Response('Cross-site request refused', { status: 403 }));
+		if ((origin && origin !== event.url.origin) || (!origin && site && site !== 'same-origin' && site !== 'none')) {
+			return done(new Response('Cross-site request refused', { status: 403, headers: { 'Content-Type': 'text/plain' } }));
 		}
 	}
 

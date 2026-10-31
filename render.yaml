@@ -40,6 +40,9 @@ services:
       # Sarvam Dubbing (Editor Flow). Set the key in the Render dashboard; never commit it.
       - key: SARVAM_API_KEY
         sync: false
+      # Address used in password links (never taken from the request's Host header when set).
+      - key: APP_ORIGIN
+        value: https://dubdesk.onrender.com
       - key: SARVAM_STUDIO_URL
         value: https://indus.sarvam.ai/
 

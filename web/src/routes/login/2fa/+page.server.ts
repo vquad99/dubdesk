@@ -4,6 +4,7 @@ import { track } from '#lib/server/activity.ts';
 import { recordLoginFailure, clearLoginFailures, loginBlockedFor } from '#lib/server/ratelimit.ts';
 import { createSession, deleteSession, homeFor } from '#lib/server/session.ts';
 import { open, verifyCode } from '#lib/server/totp.ts';
+import { safeNext } from '#lib/server/redirect.ts';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = ({ locals }) => {
@@ -49,6 +50,6 @@ export const actions: Actions = {
 		await createSession(cookies, who.id, url.protocol === 'https:', { ip, userAgent: request.headers.get('user-agent') });
 		await track(event, 'auth.login', { userId: who.id, details: 'with 2-step code' });
 		const next = url.searchParams.get('next');
-		redirect(303, next && next.startsWith('/') && !next.startsWith('//') ? next : homeFor(who.role));
+		redirect(303, safeNext(next) ?? homeFor(who.role));
 	}
 };

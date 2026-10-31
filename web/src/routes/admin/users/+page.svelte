@@ -37,7 +37,7 @@
 	}
 
 	function downloadCsv() {
-		const esc = (v: string) => `"${v.replaceAll('"', '""')}"`;
+		const esc = (v: string) => `"${(/^[=+\-@\t\r]/.test(v) ? `'${v}` : v).replaceAll('"', '""')}"`;
 		const rows = [['Name', 'Email', 'Role', 'Set-password link'], ...made.map((m) => [m.name, m.email, m.role, m.link])];
 		const blob = new Blob(['\ufeff' + rows.map((r) => r.map(esc).join(',')).join('\r\n')], { type: 'text/csv' });
 		const a = document.createElement('a');
@@ -127,7 +127,7 @@
 						<td>
 							<span class="person">
 								<span class="avatar">{u.name.slice(0, 1).toUpperCase()}</span>
-								<span><a class="pname" href="/admin/users/{u.id}">{u.name}</a><span class="muted">{u.email}</span></span>
+								<span><a class="pname" href="/admin/users/{u.id}">{u.name}</a><span class="muted">{u.email}{u.vendor ? ` · ${u.vendor}` : ''}</span></span>
 							</span>
 						</td>
 						<td><Badge label={u.role[0].toUpperCase() + u.role.slice(1)} tone={ROLE_TONE[u.role as keyof typeof ROLE_TONE]} /></td>
@@ -196,6 +196,13 @@
 					<option value="admin">Admin</option>
 				</select>
 			</label>
+			<label class="field">Vendor / company <span class="faint">(optional)</span><input name="vendor" value={picked.vendor ?? ''} maxlength="120" placeholder="e.g. LinguaWorks" /></label>
+			<fieldset class="rates">
+				<legend>Own pay rates <span class="faint">(empty = default from Analytics)</span></legend>
+				<label class="field">Per approved min<input name="pay_per_min" type="number" step="0.01" min="0" value={picked.pay_per_min ?? ''} /></label>
+				<label class="field">Per active hour<input name="pay_per_hour" type="number" step="0.01" min="0" value={picked.pay_per_hour ?? ''} /></label>
+				<label class="field">Per corrected line<input name="pay_per_line" type="number" step="0.01" min="0" value={picked.pay_per_line ?? ''} /></label>
+			</fieldset>
 			<label class="check"><input type="checkbox" name="active" checked={picked.active} /> Can log in</label>
 		</form>
 	{/if}
@@ -414,6 +421,19 @@
 	.stack {
 		display: grid;
 		gap: 14px;
+	}
+	.rates {
+		display: grid;
+		grid-template-columns: repeat(3, 1fr);
+		gap: 10px;
+		border: 1px solid var(--line);
+		border-radius: var(--radius-sm);
+		padding: 10px 12px 12px;
+		margin: 0;
+	}
+	.rates legend {
+		font-size: 13px;
+		padding: 0 4px;
 	}
 	.check {
 		display: flex;
